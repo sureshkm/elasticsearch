@@ -20,7 +20,6 @@ package org.elasticsearch.search.aggregations;
 
 import org.apache.lucene.index.AtomicReaderContext;
 import org.elasticsearch.common.lease.Releasables;
-import org.elasticsearch.common.util.BigArrays;
 import org.elasticsearch.common.util.ObjectArray;
 import org.elasticsearch.search.aggregations.Aggregator.BucketAggregationMode;
 import org.elasticsearch.search.aggregations.support.AggregationContext;
@@ -36,7 +35,7 @@ public class AggregatorFactories {
 
     public static final AggregatorFactories EMPTY = new Empty();
 
-    private final AggregatorFactory[] factories;
+    private AggregatorFactory[] factories;
 
     public static Builder builder() {
         return new Builder();
@@ -73,11 +72,12 @@ public class AggregatorFactories {
                 ObjectArray<Aggregator> aggregators;
 
                 {
-                    aggregators = BigArrays.newObjectArray(estimatedBucketsCount, context.pageCacheRecycler());
+                    // if estimated count is zero, we at least create a single aggregator.
+                    // The estimated count is just an estimation and we can't rely on how it's estimated (that is, an
+                    // estimation of 0 should not imply that we'll end up without any buckets)
+                    long arraySize = estimatedBucketsCount > 0 ?  estimatedBucketsCount : 1;
+                    aggregators = bigArrays.newObjectArray(arraySize);
                     aggregators.set(0, first);
-                    for (long i = 1; i < estimatedBucketsCount; ++i) {
-                        aggregators.set(i, createAndRegisterContextAware(parent.context(), factory, parent, estimatedBucketsCount));
-                    }
                 }
 
                 @Override
@@ -86,7 +86,7 @@ public class AggregatorFactories {
                 }
 
                 @Override
-                protected void doPostCollection() {
+                protected void doPostCollection() throws IOException {
                     for (long i = 0; i < aggregators.size(); ++i) {
                         final Aggregator aggregator = aggregators.get(i);
                         if (aggregator != null) {
@@ -97,7 +97,7 @@ public class AggregatorFactories {
 
                 @Override
                 public void collect(int doc, long owningBucketOrdinal) throws IOException {
-                    aggregators = BigArrays.grow(aggregators, owningBucketOrdinal + 1);
+                    aggregators = bigArrays.grow(aggregators, owningBucketOrdinal + 1);
                     Aggregator aggregator = aggregators.get(owningBucketOrdinal);
                     if (aggregator == null) {
                         aggregator = createAndRegisterContextAware(parent.context(), factory, parent, estimatedBucketsCount);
@@ -112,7 +112,13 @@ public class AggregatorFactories {
 
                 @Override
                 public InternalAggregation buildAggregation(long owningBucketOrdinal) {
-                    return aggregators.get(owningBucketOrdinal).buildAggregation(0);
+                    // The bucket ordinal may be out of range in case of eg. a terms/filter/terms where
+                    // the filter matches no document in the highest buckets of the first terms agg
+                    if (owningBucketOrdinal >= aggregators.size() || aggregators.get(owningBucketOrdinal) == null) {
+                        return first.buildEmptyAggregation();
+                    } else {
+                        return aggregators.get(owningBucketOrdinal).buildAggregation(0);
+                    }
                 }
 
                 @Override
@@ -121,8 +127,8 @@ public class AggregatorFactories {
                 }
 
                 @Override
-                public void doRelease() {
-                    Releasables.release(aggregators);
+                public void doClose() {
+                    Releasables.close(aggregators);
                 }
             };
         }
@@ -177,7 +183,7 @@ public class AggregatorFactories {
 
     public static class Builder {
 
-        private List<AggregatorFactory> factories = new ArrayList<AggregatorFactory>();
+        private List<AggregatorFactory> factories = new ArrayList<>();
 
         public Builder add(AggregatorFactory factory) {
             factories.add(factory);

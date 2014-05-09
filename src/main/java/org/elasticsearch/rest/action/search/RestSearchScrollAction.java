@@ -19,25 +19,21 @@
 
 package org.elasticsearch.rest.action.search;
 
-import org.elasticsearch.action.ActionListener;
-import org.elasticsearch.action.search.SearchOperationThreading;
-import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.action.search.SearchScrollRequest;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.common.xcontent.XContentBuilder;
-import org.elasticsearch.rest.*;
+import org.elasticsearch.rest.BaseRestHandler;
+import org.elasticsearch.rest.RestChannel;
+import org.elasticsearch.rest.RestController;
+import org.elasticsearch.rest.RestRequest;
 import org.elasticsearch.rest.action.support.RestActions;
+import org.elasticsearch.rest.action.support.RestStatusToXContentListener;
 import org.elasticsearch.search.Scroll;
-
-import java.io.IOException;
 
 import static org.elasticsearch.common.unit.TimeValue.parseTimeValue;
 import static org.elasticsearch.rest.RestRequest.Method.GET;
 import static org.elasticsearch.rest.RestRequest.Method.POST;
-import static org.elasticsearch.rest.RestStatus.BAD_REQUEST;
-import static org.elasticsearch.rest.action.support.RestXContentBuilder.restContentBuilder;
 
 /**
  *
@@ -62,51 +58,11 @@ public class RestSearchScrollAction extends BaseRestHandler {
         }
         SearchScrollRequest searchScrollRequest = new SearchScrollRequest(scrollId);
         searchScrollRequest.listenerThreaded(false);
-        try {
-            String scroll = request.param("scroll");
-            if (scroll != null) {
-                searchScrollRequest.scroll(new Scroll(parseTimeValue(scroll, null)));
-            }
-            SearchOperationThreading operationThreading = SearchOperationThreading.fromString(request.param("operation_threading"), null);
-            if (operationThreading != null) {
-                if (operationThreading == SearchOperationThreading.NO_THREADS) {
-                    // since we don't spawn, don't allow no_threads, but change it to a single thread
-                    operationThreading = SearchOperationThreading.SINGLE_THREAD;
-                }
-                searchScrollRequest.operationThreading(operationThreading);
-            }
-        } catch (Exception e) {
-            try {
-                XContentBuilder builder = restContentBuilder(request);
-                channel.sendResponse(new XContentRestResponse(request, BAD_REQUEST, builder.startObject().field("error", e.getMessage()).endObject()));
-            } catch (IOException e1) {
-                logger.error("Failed to send failure response", e1);
-            }
-            return;
+        String scroll = request.param("scroll");
+        if (scroll != null) {
+            searchScrollRequest.scroll(new Scroll(parseTimeValue(scroll, null)));
         }
 
-        client.searchScroll(searchScrollRequest, new ActionListener<SearchResponse>() {
-            @Override
-            public void onResponse(SearchResponse response) {
-                try {
-                    XContentBuilder builder = restContentBuilder(request);
-                    builder.startObject();
-                    response.toXContent(builder, request);
-                    builder.endObject();
-                    channel.sendResponse(new XContentRestResponse(request, response.status(), builder));
-                } catch (Throwable e) {
-                    onFailure(e);
-                }
-            }
-
-            @Override
-            public void onFailure(Throwable e) {
-                try {
-                    channel.sendResponse(new XContentThrowableRestResponse(request, e));
-                } catch (IOException e1) {
-                    logger.error("Failed to send failure response", e1);
-                }
-            }
-        });
+        client.searchScroll(searchScrollRequest, new RestStatusToXContentListener(channel));
     }
 }

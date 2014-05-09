@@ -29,6 +29,7 @@ import org.apache.lucene.search.spans.*;
 import org.apache.lucene.spatial.prefix.IntersectsPrefixTreeFilter;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.NumericUtils;
+import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.cache.recycler.CacheRecyclerModule;
 import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.common.bytes.BytesArray;
@@ -52,8 +53,11 @@ import org.elasticsearch.index.cache.IndexCacheModule;
 import org.elasticsearch.index.cache.filter.support.CacheKeyFilter;
 import org.elasticsearch.index.codec.CodecModule;
 import org.elasticsearch.index.engine.IndexEngineModule;
+import org.elasticsearch.index.fielddata.IndexFieldDataModule;
+import org.elasticsearch.index.fielddata.IndexFieldDataService;
 import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.mapper.MapperServiceModule;
+import org.elasticsearch.index.mapper.core.NumberFieldMapper;
 import org.elasticsearch.index.query.functionscore.FunctionScoreModule;
 import org.elasticsearch.index.search.NumericRangeFieldDataFilter;
 import org.elasticsearch.index.search.geo.GeoDistanceFilter;
@@ -66,6 +70,7 @@ import org.elasticsearch.indices.fielddata.breaker.DummyCircuitBreakerService;
 import org.elasticsearch.indices.query.IndicesQueriesModule;
 import org.elasticsearch.script.ScriptModule;
 import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.index.service.StubIndexService;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.threadpool.ThreadPoolModule;
 import org.hamcrest.Matchers;
@@ -116,6 +121,7 @@ public class SimpleIndexQueryParserTests extends ElasticsearchTestCase {
                 new IndexEngineModule(settings),
                 new SimilarityModule(settings),
                 new IndexQueryParserModule(settings),
+                new IndexFieldDataModule(settings),
                 new IndexNameModule(index),
                 new FunctionScoreModule(),
                 new AbstractModule() {
@@ -127,6 +133,7 @@ public class SimpleIndexQueryParserTests extends ElasticsearchTestCase {
                 }
         ).createInjector();
 
+        injector.getInstance(IndexFieldDataService.class).setIndexService((new StubIndexService(injector.getInstance(MapperService.class))));
         String mapping = copyToStringFromClasspath("/org/elasticsearch/index/query/mapping.json");
         injector.getInstance(MapperService.class).merge("person", new CompressedString(mapping), true);
         injector.getInstance(MapperService.class).documentMapper("person").parse(new BytesArray(copyToBytesFromClasspath("/org/elasticsearch/index/query/data.json")));
@@ -1563,7 +1570,7 @@ public class SimpleIndexQueryParserTests extends ElasticsearchTestCase {
         String query = copyToStringFromClasspath("/org/elasticsearch/index/query/span-multi-term-fuzzy-range.json");
         Query parsedQuery = queryParser.parse(query).query();
         assertThat(parsedQuery, instanceOf(SpanMultiTermQueryWrapper.class));
-        NumericRangeQuery<Long> expectedWrapped = NumericRangeQuery.newLongRange("age", 7l, 17l, true, true);
+        NumericRangeQuery<Long> expectedWrapped = NumericRangeQuery.newLongRange("age", NumberFieldMapper.Defaults.PRECISION_STEP_64_BIT, 7l, 17l, true, true);
         expectedWrapped.setBoost(2.0f);
         SpanMultiTermQueryWrapper<MultiTermQuery> wrapper = (SpanMultiTermQueryWrapper<MultiTermQuery>) parsedQuery;
         assertThat(wrapper, equalTo(new SpanMultiTermQueryWrapper<MultiTermQuery>(expectedWrapped)));
@@ -1575,7 +1582,7 @@ public class SimpleIndexQueryParserTests extends ElasticsearchTestCase {
         String query = copyToStringFromClasspath("/org/elasticsearch/index/query/span-multi-term-range-numeric.json");
         Query parsedQuery = queryParser.parse(query).query();
         assertThat(parsedQuery, instanceOf(SpanMultiTermQueryWrapper.class));
-        NumericRangeQuery<Long> expectedWrapped = NumericRangeQuery.newLongRange("age", 10l, 20l, true, false);
+        NumericRangeQuery<Long> expectedWrapped = NumericRangeQuery.newLongRange("age", NumberFieldMapper.Defaults.PRECISION_STEP_64_BIT, 10l, 20l, true, false);
         expectedWrapped.setBoost(2.0f);
         SpanMultiTermQueryWrapper<MultiTermQuery> wrapper = (SpanMultiTermQueryWrapper<MultiTermQuery>) parsedQuery;
         assertThat(wrapper, equalTo(new SpanMultiTermQueryWrapper<MultiTermQuery>(expectedWrapped)));
@@ -1584,10 +1591,10 @@ public class SimpleIndexQueryParserTests extends ElasticsearchTestCase {
     @Test
     public void testSpanMultiTermTermRangeQuery() throws IOException {
         IndexQueryParserService queryParser = queryParser();
-        String query = copyToStringFromClasspath("/org/elasticsearch/index/query/span-multi-term-range-numeric.json");
+        String query = copyToStringFromClasspath("/org/elasticsearch/index/query/span-multi-term-range-term.json");
         Query parsedQuery = queryParser.parse(query).query();
         assertThat(parsedQuery, instanceOf(SpanMultiTermQueryWrapper.class));
-        NumericRangeQuery<Long> expectedWrapped = NumericRangeQuery.newLongRange("age", 10l, 20l, true, false);
+        TermRangeQuery expectedWrapped = TermRangeQuery.newStringRange("user", "alice", "bob", true, false);
         expectedWrapped.setBoost(2.0f);
         SpanMultiTermQueryWrapper<MultiTermQuery> wrapper = (SpanMultiTermQueryWrapper<MultiTermQuery>) parsedQuery;
         assertThat(wrapper, equalTo(new SpanMultiTermQueryWrapper<MultiTermQuery>(expectedWrapped)));
@@ -1669,7 +1676,41 @@ public class SimpleIndexQueryParserTests extends ElasticsearchTestCase {
         IndexQueryParserService queryParser = queryParser();
         Query parsedQuery = queryParser.parse(fuzzyLikeThisQuery("name.first", "name.last").likeText("something").maxQueryTerms(12)).query();
         assertThat(parsedQuery, instanceOf(FuzzyLikeThisQuery.class));
-//        FuzzyLikeThisQuery fuzzyLikeThisQuery = (FuzzyLikeThisQuery) parsedQuery;
+        parsedQuery = queryParser.parse(fuzzyLikeThisQuery("name.first", "name.last").likeText("something").maxQueryTerms(12).fuzziness(Fuzziness.build("4"))).query();
+        assertThat(parsedQuery, instanceOf(FuzzyLikeThisQuery.class));
+
+        Query parsedQuery1 = queryParser.parse(fuzzyLikeThisQuery("name.first", "name.last").likeText("something").maxQueryTerms(12).fuzziness(Fuzziness.build("4.0"))).query();
+        assertThat(parsedQuery1, instanceOf(FuzzyLikeThisQuery.class));
+        assertThat(parsedQuery, equalTo(parsedQuery1));
+
+        try {
+            queryParser.parse(fuzzyLikeThisQuery("name.first", "name.last").likeText("something").maxQueryTerms(12).fuzziness(Fuzziness.build("4.1"))).query();
+            fail("exception expected - fractional edit distance");
+        } catch (ElasticsearchException ex) {
+           //
+        }
+
+        try {
+            queryParser.parse(fuzzyLikeThisQuery("name.first", "name.last").likeText("something").maxQueryTerms(12).fuzziness(Fuzziness.build("-" + between(1, 100)))).query();
+            fail("exception expected - negative edit distance");
+        } catch (ElasticsearchException ex) {
+            //
+        }
+        String[] queries = new String[] {
+                "{\"flt\": {\"fields\": [\"comment\"], \"like_text\": \"FFFdfds\",\"fuzziness\": \"4\"}}",
+                "{\"flt\": {\"fields\": [\"comment\"], \"like_text\": \"FFFdfds\",\"fuzziness\": \"4.00000000\"}}",
+                "{\"flt\": {\"fields\": [\"comment\"], \"like_text\": \"FFFdfds\",\"fuzziness\": \"4.\"}}",
+                "{\"flt\": {\"fields\": [\"comment\"], \"like_text\": \"FFFdfds\",\"fuzziness\": 4}}",
+                "{\"flt\": {\"fields\": [\"comment\"], \"like_text\": \"FFFdfds\",\"fuzziness\": 4.0}}"
+        };
+        int iters = scaledRandomIntBetween(5, 100);
+        for (int i = 0; i < iters; i++) {
+            parsedQuery = queryParser.parse(new BytesArray((String) randomFrom(queries))).query();
+            parsedQuery1 = queryParser.parse(new BytesArray((String) randomFrom(queries))).query();
+            assertThat(parsedQuery1, instanceOf(FuzzyLikeThisQuery.class));
+            assertThat(parsedQuery, instanceOf(FuzzyLikeThisQuery.class));
+            assertThat(parsedQuery, equalTo(parsedQuery1));
+        }
     }
 
     @Test
@@ -2033,6 +2074,29 @@ public class SimpleIndexQueryParserTests extends ElasticsearchTestCase {
         assertThat(filter.points()[2].lon(), closeTo(-90, 0.00001));
     }
 
+
+    @Test
+    public void testGeoPolygonFilterParsingExceptions() throws IOException {
+        String[] brokenFiles = new String[]{
+                "/org/elasticsearch/index/query/geo_polygon_exception_1.json",
+                "/org/elasticsearch/index/query/geo_polygon_exception_2.json",
+                "/org/elasticsearch/index/query/geo_polygon_exception_3.json",
+                "/org/elasticsearch/index/query/geo_polygon_exception_4.json",
+                "/org/elasticsearch/index/query/geo_polygon_exception_5.json"
+        };
+        for (String brokenFile : brokenFiles) {
+            IndexQueryParserService queryParser = queryParser();
+            String query = copyToStringFromClasspath(brokenFile);
+            try {
+                queryParser.parse(query).query();
+                fail("parsing a broken geo_polygon filter didn't fail as expected while parsing: " + brokenFile);
+            } catch (QueryParsingException e) {
+                // success!
+            }
+        }
+    }
+
+
     @Test
     public void testGeoPolygonFilter1() throws IOException {
         IndexQueryParserService queryParser = queryParser();
@@ -2176,7 +2240,7 @@ public class SimpleIndexQueryParserTests extends ElasticsearchTestCase {
         Query parsedQuery = queryParser.parse(query).query();
         assertThat((double) (parsedQuery.getBoost()), Matchers.closeTo(3.0, 1.e-7));
     }
-    
+
     @Test
     public void testBadTypeMatchQuery() throws Exception {
         IndexQueryParserService queryParser = queryParser();
@@ -2188,7 +2252,7 @@ public class SimpleIndexQueryParserTests extends ElasticsearchTestCase {
             expectedException = qpe;
         }
         assertThat(expectedException, notNullValue());
-    }     
+    }
 
     @Test
     public void testMultiMatchQuery() throws Exception {

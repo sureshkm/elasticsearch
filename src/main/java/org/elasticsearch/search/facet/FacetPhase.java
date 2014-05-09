@@ -128,7 +128,7 @@ public class FacetPhase implements SearchPhase {
                     if (globalDocSets == null) {
                         // build global post entries, map a reader context to a live docs docIdSet
                         List<AtomicReaderContext> leaves = context.searcher().getIndexReader().leaves();
-                        globalDocSets = new ArrayList<ContextDocIdSet>(leaves.size());
+                        globalDocSets = new ArrayList<>(leaves.size());
                         for (AtomicReaderContext leaf : leaves) {
                             globalDocSets.add(new ContextDocIdSet(
                                     leaf,
@@ -164,7 +164,7 @@ public class FacetPhase implements SearchPhase {
                     }
                     List<Collector> list = filtersByCollector.get(filter);
                     if (list == null) {
-                        list = new ArrayList<Collector>();
+                        list = new ArrayList<>();
                         filtersByCollector.put(filter, list);
                     }
                     list.add(collector);
@@ -184,18 +184,18 @@ public class FacetPhase implements SearchPhase {
                 }
                 try {
                     context.searcher().search(query, MultiCollector.wrap(entry.getValue().toArray(new Collector[entry.getValue().size()])));
+                    for (Collector collector : entry.getValue()) {
+                        if (collector instanceof XCollector) {
+                            ((XCollector) collector).postCollection();
+                        }
+                    }
                 } catch (Exception e) {
                     throw new QueryPhaseExecutionException(context, "Failed to execute global facets", e);
-                }
-                for (Collector collector : entry.getValue()) {
-                    if (collector instanceof XCollector) {
-                        ((XCollector) collector).postCollection();
-                    }
                 }
             }
         }
 
-        List<Facet> facets = new ArrayList<Facet>(context.facets().entries().size());
+        List<Facet> facets = new ArrayList<>(context.facets().entries().size());
         for (SearchContextFacets.Entry entry : context.facets().entries()) {
             facets.add(entry.getFacetExecutor().buildFacet(entry.getFacetName()));
         }

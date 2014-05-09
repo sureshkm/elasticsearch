@@ -25,12 +25,15 @@ import java.util.List;
 import org.elasticsearch.ElasticsearchIllegalArgumentException;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
+import org.elasticsearch.search.suggest.context.ContextMapping.ContextQuery;
+import org.elasticsearch.search.suggest.context.CategoryContextMapping;
+import org.elasticsearch.search.suggest.context.GeolocationContextMapping;
 import org.elasticsearch.search.suggest.phrase.PhraseSuggestionBuilder;
 import org.elasticsearch.search.suggest.term.TermSuggestionBuilder;
 
 /**
  * Defines how to perform suggesting. This builders allows a number of global options to be specified and
- * an arbitrary number of {@link org.elasticsearch.search.suggest.SuggestBuilder.TermSuggestionBuilder} instances.
+ * an arbitrary number of {@link org.elasticsearch.search.suggest.term.TermSuggestionBuilder} instances.
  * <p/>
  * Suggesting works by suggesting terms that appear in the suggest text that are similar compared to the terms in
  * provided text. These spelling suggestions are based on several options described in this class.
@@ -40,7 +43,7 @@ public class SuggestBuilder implements ToXContent {
     private final String name;
     private String globalText;
 
-    private final List<SuggestionBuilder<?>> suggestions = new ArrayList<SuggestionBuilder<?>>();
+    private final List<SuggestionBuilder<?>> suggestions = new ArrayList<>();
 
     public SuggestBuilder() {
         this.name = null;
@@ -63,7 +66,7 @@ public class SuggestBuilder implements ToXContent {
     }
 
     /**
-     * Adds an {@link org.elasticsearch.search.suggest.SuggestBuilder.TermSuggestionBuilder} instance under a user defined name.
+     * Adds an {@link org.elasticsearch.search.suggest.term.TermSuggestionBuilder} instance under a user defined name.
      * The order in which the <code>Suggestions</code> are added, is the same as in the response.
      */
     public SuggestBuilder addSuggestion(SuggestionBuilder<?> suggestion) {
@@ -123,12 +126,86 @@ public class SuggestBuilder implements ToXContent {
         private String analyzer;
         private Integer size;
         private Integer shardSize;
+        
+        private List<ContextQuery> contextQueries = new ArrayList<>();
 
         public SuggestionBuilder(String name, String suggester) {
             this.name = name;
             this.suggester = suggester;
         }
 
+        @SuppressWarnings("unchecked")
+        private T addContextQuery(ContextQuery ctx) {
+            this.contextQueries.add(ctx);
+            return (T) this;
+        }
+
+        /**
+         * Setup a Geolocation for suggestions. See {@link GeolocationContextMapping}.
+         * @param lat Latitude of the location
+         * @param lon Longitude of the Location
+         * @return this
+         */
+        public T addGeoLocation(String name, double lat, double lon, int ... precisions) {
+            return addContextQuery(GeolocationContextMapping.query(name, lat, lon, precisions));
+        }
+
+        /**
+         * Setup a Geolocation for suggestions. See {@link GeolocationContextMapping}.
+         * @param lat Latitude of the location
+         * @param lon Longitude of the Location
+         * @param precisions precisions as string var-args
+         * @return this
+         */
+        public T addGeoLocationWithPrecision(String name, double lat, double lon, String ... precisions) {
+            return addContextQuery(GeolocationContextMapping.query(name, lat, lon, precisions));
+        }
+
+        /**
+         * Setup a Geolocation for suggestions. See {@link GeolocationContextMapping}.
+         * @param geohash Geohash of the location
+         * @return this
+         */
+        public T addGeoLocation(String name, String geohash) {
+            return addContextQuery(GeolocationContextMapping.query(name, geohash));
+        }
+        
+        /**
+         * Setup a Category for suggestions. See {@link CategoryContextMapping}.
+         * @param categories name of the category
+         * @return this
+         */
+        public T addCategory(String name, CharSequence...categories) {
+            return addContextQuery(CategoryContextMapping.query(name, categories));
+        }
+        
+        /**
+         * Setup a Category for suggestions. See {@link CategoryContextMapping}.
+         * @param categories name of the category
+         * @return this
+         */
+        public T addCategory(String name, Iterable<? extends CharSequence> categories) {
+            return addContextQuery(CategoryContextMapping.query(name, categories));
+        }
+        
+        /**
+         * Setup a Context Field for suggestions. See {@link CategoryContextMapping}.
+         * @param fieldvalues name of the category
+         * @return this
+         */
+        public T addContextField(String name, CharSequence...fieldvalues) {
+            return addContextQuery(CategoryContextMapping.query(name, fieldvalues));
+        }
+        
+        /**
+         * Setup a Context Field for suggestions. See {@link CategoryContextMapping}.
+         * @param fieldvalues name of the category
+         * @return this
+         */
+        public T addContextField(String name, Iterable<? extends CharSequence> fieldvalues) {
+            return addContextQuery(CategoryContextMapping.query(name, fieldvalues));
+        }
+        
         /**
          * Same as in {@link SuggestBuilder#setText(String)}, but in the suggestion scope.
          */
@@ -157,6 +234,14 @@ public class SuggestBuilder implements ToXContent {
             if (shardSize != null) {
                 builder.field("shard_size", shardSize);
             }
+
+            if (!contextQueries.isEmpty()) {
+                builder.startObject("context");
+                for (ContextQuery query : contextQueries) {
+                    query.toXContent(builder, params);
+                }
+                builder.endObject();
+            }
             builder = innerToXContent(builder, params);
             builder.endObject();
             builder.endObject();
@@ -168,7 +253,7 @@ public class SuggestBuilder implements ToXContent {
         /**
          * Sets from what field to fetch the candidate suggestions from. This is an
          * required option and needs to be set via this setter or
-         * {@link org.elasticsearch.search.suggest.SuggestBuilder.TermSuggestionBuilder#setField(String)}
+         * {@link org.elasticsearch.search.suggest.term.TermSuggestionBuilder#field(String)}
          * method
          */
         @SuppressWarnings("unchecked")

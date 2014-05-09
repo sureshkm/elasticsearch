@@ -114,7 +114,7 @@ public abstract class TransportNodesOperationAction<Request extends NodesOperati
             clusterState = clusterService.state();
             String[] nodesIds = clusterState.nodes().resolveNodesIds(request.nodesIds());
             this.nodesIds = filterNodeIds(clusterState.nodes(), nodesIds);
-            this.responses = new AtomicReferenceArray<Object>(this.nodesIds.length);
+            this.responses = new AtomicReferenceArray<>(this.nodesIds.length);
         }
 
         private void start() {
@@ -163,6 +163,8 @@ public abstract class TransportNodesOperationAction<Request extends NodesOperati
                     } else {
                         if (node == null) {
                             onFailure(idx, nodeId, new NoSuchNodeException(nodeId));
+                        } else if (!clusterService.localNode().shouldConnectTo(node)) {
+                            onFailure(idx, nodeId, new NodeShouldNotConnectException(clusterService.localNode(), node));
                         } else {
                             NodeRequest nodeRequest = newNodeRequest(nodeId, request);
                             transportService.sendRequest(node, transportNodeAction, nodeRequest, transportRequestOptions, new BaseTransportResponseHandler<NodeResponse>() {
@@ -202,7 +204,7 @@ public abstract class TransportNodesOperationAction<Request extends NodesOperati
         }
 
         private void onFailure(int idx, String nodeId, Throwable t) {
-            if (logger.isDebugEnabled()) {
+            if (logger.isDebugEnabled() && !(t instanceof NodeShouldNotConnectException)) {
                 logger.debug("failed to execute on node [{}]", t, nodeId);
             }
             if (accumulateExceptions()) {

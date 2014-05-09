@@ -29,10 +29,14 @@ import org.elasticsearch.search.aggregations.bucket.range.RangeBuilder;
 import org.elasticsearch.search.aggregations.bucket.range.date.DateRangeBuilder;
 import org.elasticsearch.search.aggregations.bucket.range.geodistance.GeoDistanceBuilder;
 import org.elasticsearch.search.aggregations.bucket.range.ipv4.IPv4RangeBuilder;
+import org.elasticsearch.search.aggregations.bucket.nested.ReverseNestedBuilder;
+import org.elasticsearch.search.aggregations.bucket.significant.SignificantTermsBuilder;
 import org.elasticsearch.search.aggregations.bucket.terms.TermsBuilder;
 import org.elasticsearch.search.aggregations.metrics.avg.AvgBuilder;
+import org.elasticsearch.search.aggregations.metrics.cardinality.CardinalityBuilder;
 import org.elasticsearch.search.aggregations.metrics.max.MaxBuilder;
 import org.elasticsearch.search.aggregations.metrics.min.MinBuilder;
+import org.elasticsearch.search.aggregations.metrics.percentiles.PercentilesBuilder;
 import org.elasticsearch.search.aggregations.metrics.stats.StatsBuilder;
 import org.elasticsearch.search.aggregations.metrics.stats.extended.ExtendedStatsBuilder;
 import org.elasticsearch.search.aggregations.metrics.sum.SumBuilder;
@@ -90,6 +94,10 @@ public class AggregationBuilders {
         return new NestedBuilder(name);
     }
 
+    public static ReverseNestedBuilder reverseNested(String name) {
+        return new ReverseNestedBuilder(name);
+    }
+
     public static GeoDistanceBuilder geoDistance(String name) {
         return new GeoDistanceBuilder(name);
     }
@@ -100,6 +108,10 @@ public class AggregationBuilders {
     
     public static GeoHashGridBuilder geohashGrid(String name) {
         return new GeoHashGridBuilder(name);
+    }
+
+    public static SignificantTermsBuilder significantTerms(String name) {
+        return new SignificantTermsBuilder(name);
     }
 
     public static DateHistogramBuilder dateHistogram(String name) {
@@ -120,5 +132,13 @@ public class AggregationBuilders {
 
     public static TermsBuilder terms(String name) {
         return new TermsBuilder(name);
+    }
+
+    public static PercentilesBuilder percentiles(String name) {
+        return new PercentilesBuilder(name);
+    }
+
+    public static CardinalityBuilder cardinality(String name) {
+        return new CardinalityBuilder(name);
     }
 }

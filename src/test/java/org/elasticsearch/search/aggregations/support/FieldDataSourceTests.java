@@ -27,20 +27,29 @@ import org.elasticsearch.script.SearchScript;
 import org.elasticsearch.test.ElasticsearchTestCase;
 import org.junit.Test;
 
+import java.util.ArrayList;
 import java.util.Map;
 
+import static org.hamcrest.Matchers.lessThan;
 public class FieldDataSourceTests extends ElasticsearchTestCase {
 
     private static BytesValues randomBytesValues() {
         final boolean multiValued = randomBoolean();
+        final int maxLength = rarely() ? 3 : 10;
         return new BytesValues(multiValued) {
+            BytesRef previous;
             @Override
             public int setDocument(int docId) {
                 return randomInt(multiValued ? 10 : 1);
             }
             @Override
             public BytesRef nextValue() {
-                scratch.copyChars(randomAsciiOfLength(10));
+                if (previous != null && randomBoolean()) {
+                    scratch.copyBytes(previous);
+                } else {
+                    scratch.copyChars(randomAsciiOfLength(maxLength));
+                }
+                previous = BytesRef.deepCopyOf(scratch);
                 return scratch;
             }
 
@@ -103,7 +112,8 @@ public class FieldDataSourceTests extends ElasticsearchTestCase {
     }
 
     private static void assertConsistent(BytesValues values) {
-        for (int i = 0; i < 10; ++i) {
+        final int numDocs = scaledRandomIntBetween(10, 100);
+        for (int i = 0; i < numDocs; ++i) {
             final int valueCount = values.setDocument(i);
             for (int j = 0; j < valueCount; ++j) {
                 final BytesRef term = values.nextValue();
@@ -116,7 +126,7 @@ public class FieldDataSourceTests extends ElasticsearchTestCase {
     @Test
     public void bytesValuesWithScript() {
         final BytesValues values = randomBytesValues();
-        FieldDataSource source = new FieldDataSource.Bytes() {
+        ValuesSource source = new ValuesSource.Bytes() {
 
             @Override
             public BytesValues bytesValues() {
@@ -130,12 +140,29 @@ public class FieldDataSourceTests extends ElasticsearchTestCase {
 
         };
         SearchScript script = randomScript();
-        assertConsistent(new FieldDataSource.WithScript.BytesValues(source, script));
+        assertConsistent(new ValuesSource.WithScript.BytesValues(source, script));
     }
 
     @Test
     public void sortedUniqueBytesValues() {
-        assertConsistent(new FieldDataSource.Bytes.SortedAndUnique.SortedUniqueBytesValues(randomBytesValues()));
+        assertConsistent(new ValuesSource.Bytes.SortedAndUnique.SortedUniqueBytesValues(randomBytesValues()));
+        assertSortedAndUnique(new ValuesSource.Bytes.SortedAndUnique.SortedUniqueBytesValues(randomBytesValues()));
+    }
+
+    private static void assertSortedAndUnique(BytesValues values) {
+        final int numDocs = scaledRandomIntBetween(10, 100);
+        ArrayList<BytesRef> ref = new ArrayList<BytesRef>();
+        for (int i = 0; i < numDocs; ++i) {
+            final int valueCount = values.setDocument(i);
+            ref.clear();
+            for (int j = 0; j < valueCount; ++j) {
+                final BytesRef term = values.nextValue();
+                if (j > 0) {
+                    assertThat(BytesRef.getUTF8SortedAsUnicodeComparator().compare(ref.get(ref.size() - 1), term), lessThan(0));
+                }
+                ref.add(values.copyShared());
+            }
+        }
     }
 
 }

@@ -20,6 +20,7 @@ package org.elasticsearch.index.mapper.internal;
 
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.FieldType;
+import org.apache.lucene.document.XStringField;
 import org.apache.lucene.index.FieldInfo.IndexOptions;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.queries.TermFilter;
@@ -33,6 +34,7 @@ import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.lucene.BytesRefs;
 import org.elasticsearch.common.lucene.Lucene;
 import org.elasticsearch.common.lucene.search.Queries;
+import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.index.codec.postingsformat.PostingsFormatProvider;
@@ -74,6 +76,10 @@ public class ParentFieldMapper extends AbstractFieldMapper<Uid> implements Inter
 
     public static class Builder extends Mapper.Builder<Builder, ParentFieldMapper> {
 
+        private static final Settings FIELD_DATA_SETTINGS = ImmutableSettings.settingsBuilder()
+                .put(Loading.KEY, Loading.EAGER_VALUE)
+                .build();
+
         protected String indexName;
 
         private String type;
@@ -82,6 +88,7 @@ public class ParentFieldMapper extends AbstractFieldMapper<Uid> implements Inter
         public Builder() {
             super(Defaults.NAME);
             this.indexName = name;
+            builder = this;
         }
 
         public Builder type(String type) {
@@ -99,7 +106,7 @@ public class ParentFieldMapper extends AbstractFieldMapper<Uid> implements Inter
             if (type == null) {
                 throw new MapperParsingException("Parent mapping must contain the parent type");
             }
-            return new ParentFieldMapper(name, indexName, type, postingsFormat, null, context.indexSettings());
+            return new ParentFieldMapper(name, indexName, type, postingsFormat, FIELD_DATA_SETTINGS, context.indexSettings());
         }
     }
 
@@ -146,7 +153,7 @@ public class ParentFieldMapper extends AbstractFieldMapper<Uid> implements Inter
 
     @Override
     public FieldDataType defaultFieldDataType() {
-        return new FieldDataType("string");
+        return new FieldDataType("_parent");
     }
 
     @Override
@@ -164,10 +171,6 @@ public class ParentFieldMapper extends AbstractFieldMapper<Uid> implements Inter
     }
 
     @Override
-    public void validate(ParseContext context) throws MapperParsingException {
-    }
-
-    @Override
     public boolean includeInObject() {
         return true;
     }
@@ -182,7 +185,7 @@ public class ParentFieldMapper extends AbstractFieldMapper<Uid> implements Inter
             // we are in the parsing of _parent phase
             String parentId = context.parser().text();
             context.sourceToParse().parent(parentId);
-            fields.add(new Field(names.indexName(), Uid.createUid(context.stringBuilder(), type, parentId), fieldType));
+            fields.add(new XStringField(names.indexName(), Uid.createUid(context.stringBuilder(), type, parentId), fieldType));
         } else {
             // otherwise, we are running it post processing of the xcontent
             String parsedParentId = context.doc().get(Defaults.NAME);
@@ -193,7 +196,7 @@ public class ParentFieldMapper extends AbstractFieldMapper<Uid> implements Inter
                         throw new MapperParsingException("No parent id provided, not within the document, and not externally");
                     }
                     // we did not add it in the parsing phase, add it now
-                    fields.add(new Field(names.indexName(), Uid.createUid(context.stringBuilder(), type, parentId), fieldType));
+                    fields.add(new XStringField(names.indexName(), Uid.createUid(context.stringBuilder(), type, parentId), fieldType));
                 } else if (parentId != null && !parsedParentId.equals(Uid.createUid(context.stringBuilder(), type, parentId))) {
                     throw new MapperParsingException("Parent id mismatch, document value is [" + Uid.createUid(parsedParentId).id() + "], while external value is [" + parentId + "]");
                 }
@@ -260,7 +263,7 @@ public class ParentFieldMapper extends AbstractFieldMapper<Uid> implements Inter
             return new TermFilter(new Term(names.indexName(), bValue));
         }
 
-        List<String> types = new ArrayList<String>(context.mapperService().types().size());
+        List<String> types = new ArrayList<>(context.mapperService().types().size());
         for (DocumentMapper documentMapper : context.mapperService()) {
             if (!documentMapper.parentFieldMapper().active()) {
                 types.add(documentMapper.type());
@@ -273,7 +276,7 @@ public class ParentFieldMapper extends AbstractFieldMapper<Uid> implements Inter
             return new TermFilter(new Term(names.indexName(), Uid.createUidAsBytes(types.get(0), bValue)));
         } else {
             // we use all non child types, cause we don't know if its exact or not...
-            List<BytesRef> typesValues = new ArrayList<BytesRef>(types.size());
+            List<BytesRef> typesValues = new ArrayList<>(types.size());
             for (String type : context.mapperService().types()) {
                 typesValues.add(Uid.createUidAsBytes(type, bValue));
             }
@@ -291,14 +294,14 @@ public class ParentFieldMapper extends AbstractFieldMapper<Uid> implements Inter
             return termFilter(values.get(0), context);
         }
 
-        List<String> types = new ArrayList<String>(context.mapperService().types().size());
+        List<String> types = new ArrayList<>(context.mapperService().types().size());
         for (DocumentMapper documentMapper : context.mapperService()) {
             if (!documentMapper.parentFieldMapper().active()) {
                 types.add(documentMapper.type());
             }
         }
 
-        List<BytesRef> bValues = new ArrayList<BytesRef>(values.size());
+        List<BytesRef> bValues = new ArrayList<>(values.size());
         for (Object value : values) {
             BytesRef bValue = BytesRefs.toBytesRef(value);
             if (Uid.hasDelimiter(bValue)) {

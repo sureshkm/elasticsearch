@@ -21,7 +21,6 @@ package org.elasticsearch.validate;
 import com.google.common.base.Charsets;
 import org.elasticsearch.action.admin.indices.validate.query.ValidateQueryResponse;
 import org.elasticsearch.client.Client;
-import org.elasticsearch.common.Priority;
 import org.elasticsearch.common.geo.GeoDistance;
 import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.common.unit.DistanceUnit;
@@ -30,6 +29,7 @@ import org.elasticsearch.index.query.FilterBuilders;
 import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
+import org.elasticsearch.test.ElasticsearchIntegrationTest.ClusterScope;
 import org.hamcrest.Matcher;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
@@ -39,19 +39,20 @@ import org.junit.Test;
 import java.io.IOException;
 
 import static org.elasticsearch.index.query.QueryBuilders.queryString;
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertNoFailures;
 import static org.hamcrest.Matchers.*;
 
 /**
  *
  */
+@ClusterScope(randomDynamicTemplates = false)
 public class SimpleValidateQueryTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void simpleValidateQuery() throws Exception {
-
-        client().admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards", 1)).execute().actionGet();
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+        createIndex("test");
+        ensureGreen();
         client().admin().indices().preparePutMapping("test").setType("type1")
                 .setSource(XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("properties")
                         .startObject("foo").field("type", "string").endObject()
@@ -59,7 +60,7 @@ public class SimpleValidateQueryTests extends ElasticsearchIntegrationTest {
                         .endObject().endObject().endObject())
                 .execute().actionGet();
 
-        client().admin().indices().prepareRefresh().execute().actionGet();
+        refresh();
 
         assertThat(client().admin().indices().prepareValidateQuery("test").setSource("foo".getBytes(Charsets.UTF_8)).execute().actionGet().isValid(), equalTo(false));
         assertThat(client().admin().indices().prepareValidateQuery("test").setQuery(QueryBuilders.queryString("_id:1")).execute().actionGet().isValid(), equalTo(true));
@@ -75,9 +76,8 @@ public class SimpleValidateQueryTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void explainValidateQuery() throws Exception {
-
-        client().admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards", 1)).execute().actionGet();
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+        createIndex("test");
+        ensureGreen();
         client().admin().indices().preparePutMapping("test").setType("type1")
                 .setSource(XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("properties")
                         .startObject("foo").field("type", "string").endObject()
@@ -95,8 +95,7 @@ public class SimpleValidateQueryTests extends ElasticsearchIntegrationTest {
                         .endObject().endObject())
                 .execute().actionGet();
 
-        client().admin().indices().prepareRefresh().execute().actionGet();
-
+        refresh();
 
         ValidateQueryResponse response;
         response = client().admin().indices().prepareValidateQuery("test")
@@ -191,11 +190,8 @@ public class SimpleValidateQueryTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void explainValidateQueryTwoNodes() throws IOException {
-
-        client().admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder()
-                .put("index.number_of_shards", 1)
-                .put("index.number_of_replicas", 0)).execute().actionGet();
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+        createIndex("test");
+        ensureGreen();
         client().admin().indices().preparePutMapping("test").setType("type1")
                 .setSource(XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("properties")
                         .startObject("foo").field("type", "string").endObject()
@@ -205,10 +201,8 @@ public class SimpleValidateQueryTests extends ElasticsearchIntegrationTest {
                         .endObject().endObject().endObject())
                 .execute().actionGet();
 
-        client().admin().indices().prepareRefresh().execute().actionGet();
+        refresh();
 
-
-        
         for (Client client : cluster()) {
             ValidateQueryResponse response = client.admin().indices().prepareValidateQuery("test")
                     .setSource("foo".getBytes(Charsets.UTF_8))
@@ -235,7 +229,9 @@ public class SimpleValidateQueryTests extends ElasticsearchIntegrationTest {
 
     @Test //https://github.com/elasticsearch/elasticsearch/issues/3629
     public void explainDateRangeInQueryString() {
-        client().admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards", 1)).get();
+        assertAcked(prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder()
+                .put(indexSettings())
+                .put("index.number_of_shards", 1)));
 
         String aMonthAgo = ISODateTimeFormat.yearMonthDay().print(new DateTime(DateTimeZone.UTC).minusMonths(1));
         String aMonthFromNow = ISODateTimeFormat.yearMonthDay().print(new DateTime(DateTimeZone.UTC).plusMonths(1));

@@ -31,6 +31,7 @@ import org.elasticsearch.common.lucene.all.AllTermQuery;
 import org.elasticsearch.common.lucene.all.AllTokenStream;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
+import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.index.mapper.DocumentMapper;
 import org.elasticsearch.index.mapper.FieldMapper;
@@ -40,6 +41,7 @@ import org.elasticsearch.test.ElasticsearchTestCase;
 import org.hamcrest.Matchers;
 import org.junit.Test;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -178,34 +180,34 @@ public class SimpleAllMapperTests extends ElasticsearchTestCase {
         boolean fieldData = false;
         XContentBuilder mappingBuilder = jsonBuilder();
         mappingBuilder.startObject().startObject("test");
-        List<Tuple<String, Boolean>> booleanOptionList = new ArrayList<Tuple<String, Boolean>>();
+        List<Tuple<String, Boolean>> booleanOptionList = new ArrayList<>();
         boolean allDefault = true;
         if (frequently()) {
             allDefault = false;
             mappingBuilder.startObject("_all");
             if (randomBoolean()) {
-                booleanOptionList.add(new Tuple<String, Boolean>("omit_norms", omitNorms = randomBoolean()));
+                booleanOptionList.add(new Tuple<>("omit_norms", omitNorms = randomBoolean()));
             }
             if (randomBoolean()) {
-                booleanOptionList.add(new Tuple<String, Boolean>("store", stored = randomBoolean()));
+                booleanOptionList.add(new Tuple<>("store", stored = randomBoolean()));
             }
             if (randomBoolean()) {
-                booleanOptionList.add(new Tuple<String, Boolean>("store_term_vectors", tv_stored = randomBoolean()));
+                booleanOptionList.add(new Tuple<>("store_term_vectors", tv_stored = randomBoolean()));
             }
             if (randomBoolean()) {
-                booleanOptionList.add(new Tuple<String, Boolean>("enabled", enabled = randomBoolean()));
+                booleanOptionList.add(new Tuple<>("enabled", enabled = randomBoolean()));
             }
             if (randomBoolean()) {
-                booleanOptionList.add(new Tuple<String, Boolean>("auto_boost", autoBoost = randomBoolean()));
+                booleanOptionList.add(new Tuple<>("auto_boost", autoBoost = randomBoolean()));
             }
             if (randomBoolean()) {
-                booleanOptionList.add(new Tuple<String, Boolean>("store_term_vector_offsets", tv_offsets = randomBoolean()));
+                booleanOptionList.add(new Tuple<>("store_term_vector_offsets", tv_offsets = randomBoolean()));
             }
             if (randomBoolean()) {
-                booleanOptionList.add(new Tuple<String, Boolean>("store_term_vector_positions", tv_positions = randomBoolean()));
+                booleanOptionList.add(new Tuple<>("store_term_vector_positions", tv_positions = randomBoolean()));
             }
             if (randomBoolean()) {
-                booleanOptionList.add(new Tuple<String, Boolean>("store_term_vector_payloads", tv_payloads = randomBoolean()));
+                booleanOptionList.add(new Tuple<>("store_term_vector_payloads", tv_payloads = randomBoolean()));
             }
             Collections.shuffle(booleanOptionList, getRandom());
             for (Tuple<String, Boolean> option : booleanOptionList) {
@@ -235,7 +237,7 @@ public class SimpleAllMapperTests extends ElasticsearchTestCase {
                 .field("foo", "bar")
                 .field("_id", 1)
                 .field("foobar", "foobar")
-                .endObject().bytes().array();
+                .endObject().bytes().toBytes();
         Document doc = builtDocMapper.parse(new BytesArray(json)).rootDoc();
         AllField field = (AllField) doc.getField("_all");
         if (enabled) {
@@ -279,5 +281,46 @@ public class SimpleAllMapperTests extends ElasticsearchTestCase {
             assertThat(bytesStreamOutput.size(), equalTo(0));
         }
 
+    }
+
+    @Test
+    public void testMultiField_includeInAllSetToFalse() throws IOException {
+        String mapping = copyToStringFromClasspath("/org/elasticsearch/index/mapper/all/multifield-mapping_include_in_all_set_to_false.json");
+        DocumentMapper docMapper = MapperTestUtils.newParser().parse(mapping);
+
+        XContentBuilder builder = XContentFactory.jsonBuilder();
+        builder.startObject()
+                .field("_id", "1")
+                .field("foo")
+                    .startObject()
+                        .field("bar", "Elasticsearch rules!")
+                    .endObject()
+                .endObject();
+
+        Document doc = docMapper.parse(builder.bytes()).rootDoc();
+        AllField field = (AllField) doc.getField("_all");
+        AllEntries allEntries = ((AllTokenStream) field.tokenStream(docMapper.mappers().indexAnalyzer())).allEntries();
+        assertThat(allEntries.fields(), empty());
+    }
+
+    @Test
+    public void testMultiField_defaults() throws IOException {
+        String mapping = copyToStringFromClasspath("/org/elasticsearch/index/mapper/all/multifield-mapping_default.json");
+        DocumentMapper docMapper = MapperTestUtils.newParser().parse(mapping);
+
+        XContentBuilder builder = XContentFactory.jsonBuilder();
+        builder.startObject()
+                .field("_id", "1")
+                .field("foo")
+                .startObject()
+                .field("bar", "Elasticsearch rules!")
+                .endObject()
+                .endObject();
+
+        Document doc = docMapper.parse(builder.bytes()).rootDoc();
+        AllField field = (AllField) doc.getField("_all");
+        AllEntries allEntries = ((AllTokenStream) field.tokenStream(docMapper.mappers().indexAnalyzer())).allEntries();
+        assertThat(allEntries.fields(), hasSize(1));
+        assertThat(allEntries.fields(), hasItem("foo.bar"));
     }
 }

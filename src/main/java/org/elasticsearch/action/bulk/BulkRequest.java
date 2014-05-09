@@ -177,7 +177,7 @@ public class BulkRequest extends ActionRequest<BulkRequest> {
             if (payload == null) {
                 return;
             }
-            payloads = new ArrayList<Object>(requests.size() + 10);
+            payloads = new ArrayList<>(requests.size() + 10);
             // add requests#size-1 elements to the payloads if it null (we add for an *existing* request)
             for (int i = 1; i < requests.size(); i++) {
                 payloads.add(null);
@@ -257,9 +257,8 @@ public class BulkRequest extends ActionRequest<BulkRequest> {
                 break;
             }
             // now parse the action
-            XContentParser parser = xContent.createParser(data.slice(from, nextMarker - from));
 
-            try {
+            try (XContentParser parser = xContent.createParser(data.slice(from, nextMarker - from))) {
                 // move pointers
                 from = nextMarker + 1;
 
@@ -379,8 +378,6 @@ public class BulkRequest extends ActionRequest<BulkRequest> {
                     // move pointers
                     from = nextMarker + 1;
                 }
-            } finally {
-                parser.close();
             }
         }
         return this;

@@ -19,7 +19,6 @@
 
 package org.elasticsearch.rest.action.cat;
 
-import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthRequest;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse;
 import org.elasticsearch.action.admin.cluster.health.ClusterIndexHealth;
@@ -28,17 +27,21 @@ import org.elasticsearch.action.admin.cluster.state.ClusterStateResponse;
 import org.elasticsearch.action.admin.indices.stats.IndexStats;
 import org.elasticsearch.action.admin.indices.stats.IndicesStatsRequest;
 import org.elasticsearch.action.admin.indices.stats.IndicesStatsResponse;
+import org.elasticsearch.action.support.IndicesOptions;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.client.Requests;
-import org.elasticsearch.cluster.metadata.MetaData;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.Table;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.rest.*;
+import org.elasticsearch.rest.RestChannel;
+import org.elasticsearch.rest.RestController;
+import org.elasticsearch.rest.RestRequest;
+import org.elasticsearch.rest.RestResponse;
+import org.elasticsearch.rest.action.support.RestActionListener;
+import org.elasticsearch.rest.action.support.RestResponseListener;
 import org.elasticsearch.rest.action.support.RestTable;
 
-import java.io.IOException;
 import java.util.Locale;
 
 import static org.elasticsearch.rest.RestRequest.Method.GET;
@@ -66,58 +69,27 @@ public class RestIndicesAction extends AbstractCatAction {
         clusterStateRequest.local(request.paramAsBoolean("local", clusterStateRequest.local()));
         clusterStateRequest.masterNodeTimeout(request.paramAsTime("master_timeout", clusterStateRequest.masterNodeTimeout()));
 
-        client.admin().cluster().state(clusterStateRequest, new ActionListener<ClusterStateResponse>() {
+        client.admin().cluster().state(clusterStateRequest, new RestActionListener<ClusterStateResponse>(channel) {
             @Override
-            public void onResponse(final ClusterStateResponse clusterStateResponse) {
-                final String[] concreteIndices = clusterStateResponse.getState().metaData().concreteIndicesIgnoreMissing(indices);
+            public void processResponse(final ClusterStateResponse clusterStateResponse) {
+                final String[] concreteIndices = clusterStateResponse.getState().metaData().concreteIndices(indices, IndicesOptions.lenientExpandOpen());
                 ClusterHealthRequest clusterHealthRequest = Requests.clusterHealthRequest(concreteIndices);
                 clusterHealthRequest.local(request.paramAsBoolean("local", clusterHealthRequest.local()));
-                client.admin().cluster().health(clusterHealthRequest, new ActionListener<ClusterHealthResponse>() {
+                client.admin().cluster().health(clusterHealthRequest, new RestActionListener<ClusterHealthResponse>(channel) {
                     @Override
-                    public void onResponse(final ClusterHealthResponse clusterHealthResponse) {
+                    public void processResponse(final ClusterHealthResponse clusterHealthResponse) {
                         IndicesStatsRequest indicesStatsRequest = new IndicesStatsRequest();
                         indicesStatsRequest.all();
-                        client.admin().indices().stats(indicesStatsRequest, new ActionListener<IndicesStatsResponse>() {
+                        client.admin().indices().stats(indicesStatsRequest, new RestResponseListener<IndicesStatsResponse>(channel) {
                             @Override
-                            public void onResponse(IndicesStatsResponse indicesStatsResponse) {
-                                try {
-                                    Table tab = buildTable(request, concreteIndices, clusterHealthResponse, indicesStatsResponse);
-                                    channel.sendResponse(RestTable.buildResponse(tab, request, channel));
-                                } catch (Throwable e) {
-                                    onFailure(e);
-                                }
-                            }
-
-                            @Override
-                            public void onFailure(Throwable e) {
-                                try {
-                                    channel.sendResponse(new XContentThrowableRestResponse(request, e));
-                                } catch (IOException e1) {
-                                    logger.error("Failed to send failure response", e1);
-                                }
+                            public RestResponse buildResponse(IndicesStatsResponse indicesStatsResponse) throws Exception {
+                                Table tab = buildTable(request, concreteIndices, clusterHealthResponse, indicesStatsResponse);
+                                return RestTable.buildResponse(tab, channel);
                             }
                         });
 
                     }
-
-                    @Override
-                    public void onFailure(Throwable e) {
-                        try {
-                            channel.sendResponse(new XContentThrowableRestResponse(request, e));
-                        } catch (IOException e1) {
-                            logger.error("Failed to send failure response", e1);
-                        }
-                    }
                 });
-            }
-
-            @Override
-            public void onFailure(Throwable e) {
-                try {
-                    channel.sendResponse(new XContentThrowableRestResponse(request, e));
-                } catch (IOException e1) {
-                    logger.error("Failed to send failure response", e1);
-                }
             }
         });
     }
@@ -276,6 +248,16 @@ public class RestIndicesAction extends AbstractCatAction {
 
         table.addCell("warmer.total_time", "sibling:pri;alias:wtt,warmerTotalTime;default:false;text-align:right;desc:time spent in warmers");
         table.addCell("pri.warmer.total_time", "default:false;text-align:right;desc:time spent in warmers");
+
+        table.addCell("suggest.current", "sibling:pri;alias:suc,suggestCurrent;default:false;text-align:right;desc:number of current suggest ops");
+        table.addCell("pri.suggest.current", "default:false;text-align:right;desc:number of current suggest ops");
+
+        table.addCell("suggest.time", "sibling:pri;alias:suti,suggestTime;default:false;text-align:right;desc:time spend in suggest");
+        table.addCell("pri.suggest.time", "default:false;text-align:right;desc:time spend in suggest");
+
+        table.addCell("suggest.total", "sibling:pri;alias:suto,suggestTotal;default:false;text-align:right;desc:number of suggest ops");
+        table.addCell("pri.suggest.total", "default:false;text-align:right;desc:number of suggest ops");
+
 
         table.endHeaders();
         return table;
@@ -439,6 +421,15 @@ public class RestIndicesAction extends AbstractCatAction {
 
             table.addCell(indexStats == null ? null : indexStats.getTotal().getWarmer().totalTime());
             table.addCell(indexStats == null ? null : indexStats.getPrimaries().getWarmer().totalTime());
+
+            table.addCell(indexStats == null ? null : indexStats.getTotal().getSuggest().getCurrent());
+            table.addCell(indexStats == null ? null : indexStats.getPrimaries().getSuggest().getCurrent());
+
+            table.addCell(indexStats == null ? null : indexStats.getTotal().getSuggest().getTime());
+            table.addCell(indexStats == null ? null : indexStats.getPrimaries().getSuggest().getTime());
+
+            table.addCell(indexStats == null ? null : indexStats.getTotal().getSuggest().getCount());
+            table.addCell(indexStats == null ? null : indexStats.getPrimaries().getSuggest().getCount());
 
             table.endRow();
         }

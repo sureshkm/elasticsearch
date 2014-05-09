@@ -23,6 +23,7 @@ import org.elasticsearch.Build;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.Version;
 import org.elasticsearch.action.ActionModule;
+import org.elasticsearch.action.bench.BenchmarkModule;
 import org.elasticsearch.bulk.udp.BulkUdpModule;
 import org.elasticsearch.bulk.udp.BulkUdpService;
 import org.elasticsearch.cache.recycler.CacheRecycler;
@@ -51,6 +52,7 @@ import org.elasticsearch.common.network.NetworkModule;
 import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.settings.SettingsModule;
+import org.elasticsearch.common.util.BigArraysModule;
 import org.elasticsearch.discovery.Discovery;
 import org.elasticsearch.discovery.DiscoveryModule;
 import org.elasticsearch.discovery.DiscoveryService;
@@ -122,9 +124,10 @@ public final class InternalNode implements Node {
 
     public InternalNode(Settings pSettings, boolean loadConfigSettings) throws ElasticsearchException {
         Tuple<Settings, Environment> tuple = InternalSettingsPreparer.prepareSettings(pSettings, loadConfigSettings);
-        tuple = new Tuple<Settings, Environment>(TribeService.processSettings(tuple.v1()), tuple.v2());
+        tuple = new Tuple<>(TribeService.processSettings(tuple.v1()), tuple.v2());
 
-        Version version = Version.CURRENT;
+        // The only place we can actually fake the version a node is running on:
+        Version version = pSettings.getAsVersion("tests.mock.version", Version.CURRENT);
 
         ESLogger logger = Loggers.getLogger(Node.class, tuple.v1().get("name"));
         logger.info("version[{}], pid[{}], build[{}/{}]", version, JvmInfo.jvmInfo().pid(), Build.CURRENT.hashShort(), Build.CURRENT.timestamp());
@@ -151,6 +154,7 @@ public final class InternalNode implements Node {
         modules.add(new Version.Module(version));
         modules.add(new CacheRecyclerModule(settings));
         modules.add(new PageCacheRecyclerModule(settings));
+        modules.add(new BigArraysModule(settings));
         modules.add(new PluginsModule(settings, pluginsService));
         modules.add(new SettingsModule(settings));
         modules.add(new NodeModule(this));
@@ -180,6 +184,7 @@ public final class InternalNode implements Node {
         modules.add(new ResourceWatcherModule());
         modules.add(new RepositoriesModule());
         modules.add(new TribeModule());
+        modules.add(new BenchmarkModule());
 
         injector = modules.createInjector();
 

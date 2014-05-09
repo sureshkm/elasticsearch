@@ -22,9 +22,14 @@ package org.elasticsearch.common.util;
 import org.elasticsearch.common.lease.Releasable;
 
 /** Base abstraction of an array. */
-interface BigArray extends Releasable {
+public interface BigArray extends Releasable {
 
     /** Return the length of this array. */
     public long size();
+
+    /**
+     * Return an estimated memory usage of this instance.
+     */
+    public long sizeInBytes();
 
 }

@@ -29,6 +29,7 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.test.junit.annotations.TestLogging;
 import org.elasticsearch.test.ElasticsearchTestCase;
+import org.elasticsearch.test.transport.MockTransportService;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.junit.After;
 import org.junit.Before;
@@ -50,13 +51,13 @@ public abstract class AbstractSimpleTransportTests extends ElasticsearchTestCase
 
     protected static final Version version0 = Version.fromId(/*0*/99);
     protected DiscoveryNode nodeA;
-    protected TransportService serviceA;
+    protected MockTransportService serviceA;
 
     protected static final Version version1 = Version.fromId(199);
     protected DiscoveryNode nodeB;
-    protected TransportService serviceB;
+    protected MockTransportService serviceB;
 
-    protected abstract TransportService build(Settings settings, Version version);
+    protected abstract MockTransportService build(Settings settings, Version version);
 
     @Before
     public void setUp() throws Exception {
@@ -381,6 +382,45 @@ public abstract class AbstractSimpleTransportTests extends ElasticsearchTestCase
     }
 
     @Test
+    public void testNotifyOnShutdown() throws Exception {
+        final CountDownLatch latch2 = new CountDownLatch(1);
+
+        serviceA.registerHandler("foobar", new BaseTransportRequestHandler<StringMessageRequest>() {
+            @Override
+            public StringMessageRequest newInstance() {
+                return new StringMessageRequest();
+            }
+
+            @Override
+            public String executor() {
+                return ThreadPool.Names.GENERIC;
+            }
+
+            @Override
+            public void messageReceived(StringMessageRequest request, TransportChannel channel) {
+
+                try {
+                    latch2.await();
+                    logger.info("Stop ServiceB now");
+                    serviceB.stop();
+                } catch (Exception e) {
+                    fail(e.getMessage());
+                }
+            }
+        });
+        TransportFuture<TransportResponse.Empty> foobar = serviceB.submitRequest(nodeA, "foobar",
+                new StringMessageRequest(""), options(), EmptyTransportResponseHandler.INSTANCE_SAME);
+        latch2.countDown();
+        try {
+            foobar.txGet();
+            fail("TransportException expected");
+        } catch (TransportException ex) {
+
+        }
+        serviceA.removeHandler("sayHelloTimeoutDelayedResponse");
+    }
+
+    @Test
     public void testTimeoutSendExceptionWithNeverSendingBackResponse() throws Exception {
         serviceA.registerHandler("sayHelloTimeoutNoResponse", new BaseTransportRequestHandler<StringMessageRequest>() {
             @Override
@@ -440,7 +480,6 @@ public abstract class AbstractSimpleTransportTests extends ElasticsearchTestCase
     }
 
     @Test
-    @TestLogging("_root:TRACE")
     public void testTimeoutSendExceptionWithDelayedResponse() throws Exception {
         serviceA.registerHandler("sayHelloTimeoutDelayedResponse", new BaseTransportRequestHandler<StringMessageRequest>() {
             @Override
@@ -469,7 +508,7 @@ public abstract class AbstractSimpleTransportTests extends ElasticsearchTestCase
                 }
             }
         });
-
+        final CountDownLatch latch = new CountDownLatch(1);
         TransportFuture<StringMessageResponse> res = serviceB.submitRequest(nodeA, "sayHelloTimeoutDelayedResponse",
                 new StringMessageRequest("300ms"), options().withTimeout(100), new BaseTransportResponseHandler<StringMessageResponse>() {
             @Override
@@ -484,11 +523,13 @@ public abstract class AbstractSimpleTransportTests extends ElasticsearchTestCase
 
             @Override
             public void handleResponse(StringMessageResponse response) {
+                latch.countDown();
                 assertThat("got response instead of exception", false, equalTo(true));
             }
 
             @Override
             public void handleException(TransportException exp) {
+                latch.countDown();
                 assertThat(exp, instanceOf(ReceiveTimeoutTransportException.class));
             }
         });
@@ -499,15 +540,13 @@ public abstract class AbstractSimpleTransportTests extends ElasticsearchTestCase
         } catch (Exception e) {
             assertThat(e, instanceOf(ReceiveTimeoutTransportException.class));
         }
-
-        // sleep for 400 millis to make sure we get back the response
-        Thread.sleep(400);
+        latch.await();
 
         for (int i = 0; i < 10; i++) {
             final int counter = i;
             // now, try and send another request, this times, with a short timeout
             res = serviceB.submitRequest(nodeA, "sayHelloTimeoutDelayedResponse",
-                    new StringMessageRequest(counter + "ms"), options().withTimeout(100), new BaseTransportResponseHandler<StringMessageResponse>() {
+                    new StringMessageRequest(counter + "ms"), options().withTimeout(300), new BaseTransportResponseHandler<StringMessageResponse>() {
                 @Override
                 public StringMessageResponse newInstance() {
                     return new StringMessageResponse();
@@ -871,5 +910,143 @@ public abstract class AbstractSimpleTransportTests extends ElasticsearchTestCase
         }).txGet();
 
         assertThat(version0Response.value1, equalTo(1));
+    }
+
+    @Test
+    public void testMockFailToSendNoConnectRule() {
+        serviceA.registerHandler("sayHello", new BaseTransportRequestHandler<StringMessageRequest>() {
+            @Override
+            public StringMessageRequest newInstance() {
+                return new StringMessageRequest();
+            }
+
+            @Override
+            public String executor() {
+                return ThreadPool.Names.GENERIC;
+            }
+
+            @Override
+            public void messageReceived(StringMessageRequest request, TransportChannel channel) throws Exception {
+                assertThat("moshe", equalTo(request.message));
+                throw new RuntimeException("bad message !!!");
+            }
+        });
+
+        serviceB.addFailToSendNoConnectRule(nodeA);
+
+        TransportFuture<StringMessageResponse> res = serviceB.submitRequest(nodeA, "sayHello",
+                new StringMessageRequest("moshe"), new BaseTransportResponseHandler<StringMessageResponse>() {
+                    @Override
+                    public StringMessageResponse newInstance() {
+                        return new StringMessageResponse();
+                    }
+
+                    @Override
+                    public String executor() {
+                        return ThreadPool.Names.GENERIC;
+                    }
+
+                    @Override
+                    public void handleResponse(StringMessageResponse response) {
+                        assertThat("got response instead of exception", false, equalTo(true));
+                    }
+
+                    @Override
+                    public void handleException(TransportException exp) {
+                        assertThat(exp.getCause().getMessage(), endsWith("DISCONNECT: simulated"));
+                    }
+                });
+
+        try {
+            res.txGet();
+            assertThat("exception should be thrown", false, equalTo(true));
+        } catch (Exception e) {
+            assertThat(e.getCause().getMessage(), endsWith("DISCONNECT: simulated"));
+        }
+
+        try {
+            serviceB.connectToNode(nodeA);
+            assertThat("exception should be thrown", false, equalTo(true));
+        } catch (ConnectTransportException e) {
+            // all is well
+        }
+
+        try {
+            serviceB.connectToNodeLight(nodeA);
+            assertThat("exception should be thrown", false, equalTo(true));
+        } catch (ConnectTransportException e) {
+            // all is well
+        }
+
+        serviceA.removeHandler("sayHello");
+    }
+
+    @Test
+    public void testMockUnresponsiveRule() {
+        serviceA.registerHandler("sayHello", new BaseTransportRequestHandler<StringMessageRequest>() {
+            @Override
+            public StringMessageRequest newInstance() {
+                return new StringMessageRequest();
+            }
+
+            @Override
+            public String executor() {
+                return ThreadPool.Names.GENERIC;
+            }
+
+            @Override
+            public void messageReceived(StringMessageRequest request, TransportChannel channel) throws Exception {
+                assertThat("moshe", equalTo(request.message));
+                throw new RuntimeException("bad message !!!");
+            }
+        });
+
+        serviceB.addUnresponsiveRule(nodeA);
+
+        TransportFuture<StringMessageResponse> res = serviceB.submitRequest(nodeA, "sayHello",
+                new StringMessageRequest("moshe"), TransportRequestOptions.options().withTimeout(100), new BaseTransportResponseHandler<StringMessageResponse>() {
+                    @Override
+                    public StringMessageResponse newInstance() {
+                        return new StringMessageResponse();
+                    }
+
+                    @Override
+                    public String executor() {
+                        return ThreadPool.Names.GENERIC;
+                    }
+
+                    @Override
+                    public void handleResponse(StringMessageResponse response) {
+                        assertThat("got response instead of exception", false, equalTo(true));
+                    }
+
+                    @Override
+                    public void handleException(TransportException exp) {
+                        assertThat(exp, instanceOf(ReceiveTimeoutTransportException.class));
+                    }
+                });
+
+        try {
+            res.txGet();
+            assertThat("exception should be thrown", false, equalTo(true));
+        } catch (Exception e) {
+            assertThat(e, instanceOf(ReceiveTimeoutTransportException.class));
+        }
+
+        try {
+            serviceB.connectToNode(nodeA);
+            assertThat("exception should be thrown", false, equalTo(true));
+        } catch (ConnectTransportException e) {
+            // all is well
+        }
+
+        try {
+            serviceB.connectToNodeLight(nodeA);
+            assertThat("exception should be thrown", false, equalTo(true));
+        } catch (ConnectTransportException e) {
+            // all is well
+        }
+
+        serviceA.removeHandler("sayHello");
     }
 }

@@ -19,8 +19,15 @@
 
 package org.apache.lucene.queries;
 
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.index.TermContext;
+import org.apache.lucene.search.*;
 import org.apache.lucene.search.BooleanClause.Occur;
 import org.elasticsearch.common.lucene.search.Queries;
+import org.elasticsearch.index.mapper.FieldMapper;
+
+import java.io.IOException;
 
 /**
  * Extended version of {@link CommonTermsQuery} that allows to pass in a
@@ -29,12 +36,11 @@ import org.elasticsearch.common.lucene.search.Queries;
  */
 public class ExtendedCommonTermsQuery extends CommonTermsQuery {
 
-    public ExtendedCommonTermsQuery(Occur highFreqOccur, Occur lowFreqOccur, float maxTermFrequency, boolean disableCoord) {
-        super(highFreqOccur, lowFreqOccur, maxTermFrequency, disableCoord);
-    }
+    private final FieldMapper<?> mapper;
 
-    public ExtendedCommonTermsQuery(Occur highFreqOccur, Occur lowFreqOccur, float maxTermFrequency) {
-        super(highFreqOccur, lowFreqOccur, maxTermFrequency);
+    public ExtendedCommonTermsQuery(Occur highFreqOccur, Occur lowFreqOccur, float maxTermFrequency, boolean disableCoord, FieldMapper<?> mapper) {
+        super(highFreqOccur, lowFreqOccur, maxTermFrequency, disableCoord);
+        this.mapper = mapper;
     }
 
     private String lowFreqMinNumShouldMatchSpec;
@@ -71,5 +77,18 @@ public class ExtendedCommonTermsQuery extends CommonTermsQuery {
 
     public String getLowFreqMinimumNumberShouldMatchSpec() {
         return lowFreqMinNumShouldMatchSpec;
+    }
+
+    @Override
+    protected Query newTermQuery(Term term, TermContext context) {
+        if (mapper == null) {
+            return super.newTermQuery(term, context);
+        }
+        final Query query = mapper.queryStringTermQuery(term);
+        if (query == null) {
+            return super.newTermQuery(term, context);
+        } else {
+            return query;
+        }
     }
 }

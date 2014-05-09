@@ -19,18 +19,19 @@
 package org.elasticsearch.search.aggregations.bucket.range;
 
 import com.google.common.collect.Lists;
-import org.elasticsearch.cache.recycler.CacheRecycler;
+import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.text.StringText;
 import org.elasticsearch.common.text.Text;
+import org.elasticsearch.common.util.BigArrays;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.search.aggregations.AggregationStreams;
 import org.elasticsearch.search.aggregations.Aggregations;
 import org.elasticsearch.search.aggregations.InternalAggregation;
 import org.elasticsearch.search.aggregations.InternalAggregations;
-import org.elasticsearch.search.aggregations.support.numeric.ValueFormatter;
-import org.elasticsearch.search.aggregations.support.numeric.ValueFormatterStreams;
+import org.elasticsearch.search.aggregations.support.format.ValueFormatter;
+import org.elasticsearch.search.aggregations.support.format.ValueFormatterStreams;
 
 import java.io.IOException;
 import java.util.*;
@@ -64,16 +65,9 @@ public class InternalRange<B extends InternalRange.Bucket> extends InternalAggre
         private long docCount;
         InternalAggregations aggregations;
         private String key;
-        private boolean explicitKey;
 
-        public Bucket(String key, double from, double to, long docCount, InternalAggregations aggregations, ValueFormatter formatter) {
-            if (key != null) {
-                this.key = key;
-                explicitKey = true;
-            } else {
-                this.key = key(from, to, formatter);
-                explicitKey = false;
-            }
+        public Bucket(String key, double from, double to, long docCount, InternalAggregations aggregations, @Nullable ValueFormatter formatter) {
+            this.key = key != null ? key : generateKey(from, to, formatter);
             this.from = from;
             this.to = to;
             this.docCount = docCount;
@@ -109,11 +103,11 @@ public class InternalRange<B extends InternalRange.Bucket> extends InternalAggre
             return aggregations;
         }
 
-        Bucket reduce(List<Bucket> ranges, CacheRecycler cacheRecycler) {
+        Bucket reduce(List<Bucket> ranges, BigArrays bigArrays) {
             if (ranges.size() == 1) {
                 // we stil need to call reduce on all the sub aggregations
                 Bucket bucket = ranges.get(0);
-                bucket.aggregations.reduce(cacheRecycler);
+                bucket.aggregations.reduce(bigArrays);
                 return bucket;
             }
             Bucket reduced = null;
@@ -126,18 +120,16 @@ public class InternalRange<B extends InternalRange.Bucket> extends InternalAggre
                 }
                 aggregationsList.add(range.aggregations);
             }
-            reduced.aggregations = InternalAggregations.reduce(aggregationsList, cacheRecycler);
+            reduced.aggregations = InternalAggregations.reduce(aggregationsList, bigArrays);
             return reduced;
         }
 
-        void toXContent(XContentBuilder builder, Params params, ValueFormatter formatter, boolean keyed) throws IOException {
+        void toXContent(XContentBuilder builder, Params params, @Nullable ValueFormatter formatter, boolean keyed) throws IOException {
             if (keyed) {
                 builder.startObject(key);
             } else {
                 builder.startObject();
-                if (explicitKey) {
-                    builder.field(CommonFields.KEY, key);
-                }
+                builder.field(CommonFields.KEY, key);
             }
             if (!Double.isInfinite(from)) {
                 builder.field(CommonFields.FROM, from);
@@ -156,11 +148,11 @@ public class InternalRange<B extends InternalRange.Bucket> extends InternalAggre
             builder.endObject();
         }
 
-        private static String key(double from, double to, ValueFormatter formatter) {
+        protected String generateKey(double from, double to, @Nullable ValueFormatter formatter) {
             StringBuilder sb = new StringBuilder();
-            sb.append(Double.isInfinite(from) ? "*" : formatter != null ? formatter.format(from) : from);
+            sb.append(Double.isInfinite(from) ? "*" : formatter != null ? formatter.format(from) : ValueFormatter.RAW.format(from));
             sb.append("-");
-            sb.append(Double.isInfinite(to) ? "*" : formatter != null ? formatter.format(to) : to);
+            sb.append(Double.isInfinite(to) ? "*" : formatter != null ? formatter.format(to) : ValueFormatter.RAW.format(to));
             return sb.toString();
         }
 
@@ -172,26 +164,25 @@ public class InternalRange<B extends InternalRange.Bucket> extends InternalAggre
             return TYPE.name();
         }
 
-        public R create(String name, List<B> ranges, ValueFormatter formatter, boolean keyed, boolean unmapped) {
-            return (R) new InternalRange<B>(name, ranges, formatter, keyed, unmapped);
+        public R create(String name, List<B> ranges, @Nullable ValueFormatter formatter, boolean keyed, boolean unmapped) {
+            return (R) new InternalRange<>(name, ranges, formatter, keyed, unmapped);
         }
 
 
-        public B createBucket(String key, double from, double to, long docCount, InternalAggregations aggregations, ValueFormatter formatter) {
+        public B createBucket(String key, double from, double to, long docCount, InternalAggregations aggregations, @Nullable ValueFormatter formatter) {
             return (B) new Bucket(key, from, to, docCount, aggregations, formatter);
         }
     }
 
     private List<B> ranges;
     private Map<String, B> rangeMap;
-    private ValueFormatter formatter;
+    private @Nullable ValueFormatter formatter;
     private boolean keyed;
-
     private boolean unmapped;
 
     public InternalRange() {} // for serialization
 
-    public InternalRange(String name, List<B> ranges, ValueFormatter formatter, boolean keyed, boolean unmapped) {
+    public InternalRange(String name, List<B> ranges, @Nullable ValueFormatter formatter, boolean keyed, boolean unmapped) {
         super(name);
         this.ranges = ranges;
         this.formatter = formatter;
@@ -212,7 +203,7 @@ public class InternalRange<B extends InternalRange.Bucket> extends InternalAggre
     @Override
     public B getBucketByKey(String key) {
         if (rangeMap == null) {
-            rangeMap = new HashMap<String, B>(ranges.size());
+            rangeMap = new HashMap<>(ranges.size());
             for (Range.Bucket bucket : ranges) {
                 rangeMap.put(bucket.getKey(), (B) bucket);
             }
@@ -226,7 +217,7 @@ public class InternalRange<B extends InternalRange.Bucket> extends InternalAggre
         if (aggregations.size() == 1) {
             InternalRange<B> reduced = (InternalRange<B>) aggregations.get(0);
             for (B bucket : reduced.ranges) {
-                bucket.aggregations.reduce(reduceContext.cacheRecycler());
+                bucket.aggregations.reduce(reduceContext.bigArrays());
             }
             return reduced;
         }
@@ -237,9 +228,9 @@ public class InternalRange<B extends InternalRange.Bucket> extends InternalAggre
                 continue;
             }
             if (rangesList == null) {
-                rangesList = new ArrayList<List<Bucket>>(ranges.ranges.size());
+                rangesList = new ArrayList<>(ranges.ranges.size());
                 for (Bucket bucket : ranges.ranges) {
-                    List<Bucket> sameRangeList = new ArrayList<Bucket>(aggregations.size());
+                    List<Bucket> sameRangeList = new ArrayList<>(aggregations.size());
                     sameRangeList.add(bucket);
                     rangesList.add(sameRangeList);
                 }
@@ -259,7 +250,7 @@ public class InternalRange<B extends InternalRange.Bucket> extends InternalAggre
         InternalRange reduced = (InternalRange) aggregations.get(0);
         int i = 0;
         for (List<Bucket> sameRangeList : rangesList) {
-            reduced.ranges.set(i++, (sameRangeList.get(0)).reduce(sameRangeList, reduceContext.cacheRecycler()));
+            reduced.ranges.set(i++, (sameRangeList.get(0)).reduce(sameRangeList, reduceContext.bigArrays()));
         }
         return reduced;
     }

@@ -19,6 +19,7 @@
 package org.elasticsearch.percolator;
 
 import com.carrotsearch.hppc.FloatArrayList;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import org.apache.lucene.index.AtomicReaderContext;
 import org.apache.lucene.search.*;
@@ -61,8 +62,7 @@ abstract class QueryCollector extends Collector {
 
     BytesValues values;
 
-    final List<Collector> facetCollectors = new ArrayList<Collector>();
-    final Collector facetAndAggregatorCollector;
+    final List<Collector> facetAndAggregatorCollector;
 
     QueryCollector(ESLogger logger, PercolateContext context) {
         this.logger = logger;
@@ -71,6 +71,7 @@ abstract class QueryCollector extends Collector {
         final FieldMapper<?> idMapper = context.mapperService().smartNameFieldMapper(IdFieldMapper.NAME);
         this.idFieldData = context.fieldData().getForField(idMapper);
 
+        ImmutableList.Builder<Collector> facetAggCollectorBuilder = ImmutableList.builder();
         if (context.facets() != null) {
             for (SearchContextFacets.Entry entry : context.facets().entries()) {
                 if (entry.isGlobal()) {
@@ -84,16 +85,15 @@ abstract class QueryCollector extends Collector {
                         collector = new FilteredCollector(collector, entry.getFilter());
                     }
                 }
-                facetCollectors.add(collector);
+                facetAggCollectorBuilder.add(collector);
             }
         }
 
-        List<Collector> collectors = new ArrayList<Collector>(facetCollectors);
         if (context.aggregations() != null) {
             AggregationContext aggregationContext = new AggregationContext(context);
             context.aggregations().aggregationContext(aggregationContext);
 
-            List<Aggregator> aggregatorCollectors = new ArrayList<Aggregator>();
+            List<Aggregator> aggregatorCollectors = new ArrayList<>();
             Aggregator[] aggregators = context.aggregations().factories().createTopLevelAggregators(aggregationContext);
             for (int i = 0; i < aggregators.length; i++) {
                 if (!(aggregators[i] instanceof GlobalAggregator)) {
@@ -105,24 +105,23 @@ abstract class QueryCollector extends Collector {
             }
             context.aggregations().aggregators(aggregators);
             if (!aggregatorCollectors.isEmpty()) {
-                collectors.add(new AggregationPhase.AggregationsCollector(aggregatorCollectors, aggregationContext));
+                facetAggCollectorBuilder.add(new AggregationPhase.AggregationsCollector(aggregatorCollectors, aggregationContext));
             }
+            aggregationContext.setNextReader(context.searcher().getIndexReader().getContext());
         }
+        facetAndAggregatorCollector = facetAggCollectorBuilder.build();
+    }
 
-        int size = collectors.size();
-        if (size == 0) {
-            facetAndAggregatorCollector = null;
-        } else if (size == 1) {
-            facetAndAggregatorCollector = collectors.get(0);
-        } else {
-            facetAndAggregatorCollector = MultiCollector.wrap(collectors.toArray(new Collector[collectors.size()]));
+    public void postMatch(int doc) throws IOException {
+        for (Collector collector : facetAndAggregatorCollector) {
+            collector.collect(doc);
         }
     }
 
     @Override
     public void setScorer(Scorer scorer) throws IOException {
-        if (facetAndAggregatorCollector != null) {
-            facetAndAggregatorCollector.setScorer(scorer);
+        for (Collector collector : facetAndAggregatorCollector) {
+            collector.setScorer(scorer);
         }
     }
 
@@ -130,8 +129,8 @@ abstract class QueryCollector extends Collector {
     public void setNextReader(AtomicReaderContext context) throws IOException {
         // we use the UID because id might not be indexed
         values = idFieldData.load(context).getBytesValues(true);
-        if (facetAndAggregatorCollector != null) {
-            facetAndAggregatorCollector.setNextReader(context);
+        for (Collector collector : facetAndAggregatorCollector) {
+            collector.setNextReader(context);
         }
     }
 
@@ -175,8 +174,8 @@ abstract class QueryCollector extends Collector {
         final PercolateContext context;
         final HighlightPhase highlightPhase;
 
-        final List<BytesRef> matches = new ArrayList<BytesRef>();
-        final List<Map<String, HighlightField>> hls = new ArrayList<Map<String, HighlightField>>();
+        final List<BytesRef> matches = new ArrayList<>();
+        final List<Map<String, HighlightField>> hls = new ArrayList<>();
         final boolean limit;
         final int size;
         long counter = 0;
@@ -184,7 +183,7 @@ abstract class QueryCollector extends Collector {
         Match(ESLogger logger, PercolateContext context, HighlightPhase highlightPhase) {
             super(logger, context);
             this.limit = context.limit;
-            this.size = context.size;
+            this.size = context.size();
             this.context = context;
             this.highlightPhase = highlightPhase;
         }
@@ -214,9 +213,7 @@ abstract class QueryCollector extends Collector {
                         }
                     }
                     counter++;
-                    if (facetAndAggregatorCollector != null) {
-                        facetAndAggregatorCollector.collect(doc);
-                    }
+                    postMatch(doc);
                 }
             } catch (IOException e) {
                 logger.warn("[" + spare.bytes.utf8ToString() + "] failed to execute query", e);
@@ -243,7 +240,7 @@ abstract class QueryCollector extends Collector {
         MatchAndSort(ESLogger logger, PercolateContext context) {
             super(logger, context);
             // TODO: Use TopFieldCollector.create(...) for ascending and decending scoring?
-            topDocsCollector = TopScoreDocCollector.create(context.size, false);
+            topDocsCollector = TopScoreDocCollector.create(context.size(), false);
         }
 
         @Override
@@ -259,9 +256,7 @@ abstract class QueryCollector extends Collector {
                 searcher.search(query, collector);
                 if (collector.exists()) {
                     topDocsCollector.collect(doc);
-                    if (facetAndAggregatorCollector != null) {
-                        facetAndAggregatorCollector.collect(doc);
-                    }
+                    postMatch(doc);
                 }
             } catch (IOException e) {
                 logger.warn("[" + spare.bytes.utf8ToString() + "] failed to execute query", e);
@@ -290,8 +285,8 @@ abstract class QueryCollector extends Collector {
         final PercolateContext context;
         final HighlightPhase highlightPhase;
 
-        final List<BytesRef> matches = new ArrayList<BytesRef>();
-        final List<Map<String, HighlightField>> hls = new ArrayList<Map<String, HighlightField>>();
+        final List<BytesRef> matches = new ArrayList<>();
+        final List<Map<String, HighlightField>> hls = new ArrayList<>();
         // TODO: Use thread local in order to cache the scores lists?
         final FloatArrayList scores = new FloatArrayList();
         final boolean limit;
@@ -303,7 +298,7 @@ abstract class QueryCollector extends Collector {
         MatchAndScore(ESLogger logger, PercolateContext context, HighlightPhase highlightPhase) {
             super(logger, context);
             this.limit = context.limit;
-            this.size = context.size;
+            this.size = context.size();
             this.context = context;
             this.highlightPhase = highlightPhase;
         }
@@ -333,9 +328,7 @@ abstract class QueryCollector extends Collector {
                         }
                     }
                     counter++;
-                    if (facetAndAggregatorCollector != null) {
-                        facetAndAggregatorCollector.collect(doc);
-                    }
+                    postMatch(doc);
                 }
             } catch (IOException e) {
                 logger.warn("[" + spare.bytes.utf8ToString() + "] failed to execute query", e);
@@ -385,9 +378,7 @@ abstract class QueryCollector extends Collector {
                 searcher.search(query, collector);
                 if (collector.exists()) {
                     counter++;
-                    if (facetAndAggregatorCollector != null) {
-                        facetAndAggregatorCollector.collect(doc);
-                    }
+                    postMatch(doc);
                 }
             } catch (IOException e) {
                 logger.warn("[" + spare.bytes.utf8ToString() + "] failed to execute query", e);

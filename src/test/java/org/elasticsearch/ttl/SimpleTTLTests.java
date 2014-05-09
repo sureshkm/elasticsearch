@@ -19,30 +19,38 @@
 
 package org.elasticsearch.ttl;
 
+import com.google.common.base.Predicate;
 import org.elasticsearch.action.admin.indices.stats.IndicesStatsResponse;
 import org.elasticsearch.action.get.GetResponse;
-import org.elasticsearch.common.Priority;
+import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
 import org.elasticsearch.test.ElasticsearchIntegrationTest.ClusterScope;
-import org.elasticsearch.test.ElasticsearchIntegrationTest.Scope;
 import org.junit.Test;
 
+import java.util.concurrent.TimeUnit;
+
 import static org.elasticsearch.common.settings.ImmutableSettings.settingsBuilder;
+import static org.elasticsearch.test.ElasticsearchIntegrationTest.*;
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.hamcrest.Matchers.*;
 
-@ClusterScope(scope=Scope.TEST)
+@ClusterScope(scope= Scope.SUITE, numDataNodes = 1)
 public class SimpleTTLTests extends ElasticsearchIntegrationTest {
 
     static private final long PURGE_INTERVAL = 200;
-    
+
+    @Override
+    protected int numberOfShards() {
+        return 2;
+    }
+
     @Override
     protected Settings nodeSettings(int nodeOrdinal) {
         return settingsBuilder()
                 .put(super.nodeSettings(nodeOrdinal))
                 .put("indices.ttl.interval", PURGE_INTERVAL)
-                .put("index.number_of_shards", 2) // 2 shards to test TTL purge with routing properly
                 .put("cluster.routing.operation.use_type", false) // make sure we control the shard computation
                 .put("cluster.routing.operation.hash.type", "djb")
                 .build();
@@ -50,8 +58,7 @@ public class SimpleTTLTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void testSimpleTTL() throws Exception {
-
-        client().admin().indices().prepareCreate("test")
+        assertAcked(prepareCreate("test")
                 .addMapping("type1", XContentFactory.jsonBuilder()
                         .startObject()
                         .startObject("type1")
@@ -65,59 +72,62 @@ public class SimpleTTLTests extends ElasticsearchIntegrationTest {
                         .startObject("_timestamp").field("enabled", true).field("store", "yes").endObject()
                         .startObject("_ttl").field("enabled", true).field("store", "yes").field("default", "1d").endObject()
                         .endObject()
-                        .endObject())
-                .execute().actionGet();
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+                        .endObject()));
+        ensureYellow("test");
+
+        final NumShards test = getNumShards("test");
 
         long providedTTLValue = 3000;
         logger.info("--> checking ttl");
         // Index one doc without routing, one doc with routing, one doc with not TTL and no default and one doc with default TTL
-        client().prepareIndex("test", "type1", "1").setSource("field1", "value1").setTTL(providedTTLValue).setRefresh(true).execute().actionGet();
         long now = System.currentTimeMillis();
-        client().prepareIndex("test", "type1", "with_routing").setSource("field1", "value1").setTTL(providedTTLValue).setRouting("routing").setRefresh(true).execute().actionGet();
-        client().prepareIndex("test", "type1", "no_ttl").setSource("field1", "value1").execute().actionGet();
-        client().prepareIndex("test", "type2", "default_ttl").setSource("field1", "value1").execute().actionGet();
+        IndexResponse indexResponse = client().prepareIndex("test", "type1", "1").setSource("field1", "value1")
+                .setTimestamp(String.valueOf(now)).setTTL(providedTTLValue).setRefresh(true).get();
+        assertThat(indexResponse.isCreated(), is(true));
+        indexResponse = client().prepareIndex("test", "type1", "with_routing").setSource("field1", "value1")
+                .setTimestamp(String.valueOf(now)).setTTL(providedTTLValue).setRouting("routing").setRefresh(true).get();
+        assertThat(indexResponse.isCreated(), is(true));
+        indexResponse = client().prepareIndex("test", "type1", "no_ttl").setSource("field1", "value1").get();
+        assertThat(indexResponse.isCreated(), is(true));
+        indexResponse = client().prepareIndex("test", "type2", "default_ttl").setSource("field1", "value1").get();
+        assertThat(indexResponse.isCreated(), is(true));
 
         // realtime get check
         long currentTime = System.currentTimeMillis();
-        GetResponse getResponse = client().prepareGet("test", "type1", "1").setFields("_ttl").setRealtime(true).execute().actionGet();
+        GetResponse getResponse = client().prepareGet("test", "type1", "1").setFields("_ttl").get();
         long ttl0;
         if (getResponse.isExists()) {
             ttl0 = ((Number) getResponse.getField("_ttl").getValue()).longValue();
-            assertThat(ttl0, greaterThan(-PURGE_INTERVAL));
-            assertThat(ttl0, lessThan(providedTTLValue - (currentTime - now)));
+            assertThat(ttl0, lessThanOrEqualTo(providedTTLValue - (currentTime - now)));
         } else {
-            assertThat(providedTTLValue - (currentTime - now), lessThan(0l));
+            assertThat(providedTTLValue - (currentTime - now), lessThanOrEqualTo(0l));
         }
         // verify the ttl is still decreasing when going to the replica
         currentTime = System.currentTimeMillis();
-        getResponse = client().prepareGet("test", "type1", "1").setFields("_ttl").setRealtime(true).execute().actionGet();
+        getResponse = client().prepareGet("test", "type1", "1").setFields("_ttl").get();
         if (getResponse.isExists()) {
             ttl0 = ((Number) getResponse.getField("_ttl").getValue()).longValue();
-            assertThat(ttl0, greaterThan(-PURGE_INTERVAL));
-            assertThat(ttl0, lessThan(providedTTLValue - (currentTime - now)));
+            assertThat(ttl0, lessThanOrEqualTo(providedTTLValue - (currentTime - now)));
         } else {
-            assertThat(providedTTLValue - (currentTime - now), lessThan(0l));
+            assertThat(providedTTLValue - (currentTime - now), lessThanOrEqualTo(0l));
         }
         // non realtime get (stored)
         currentTime = System.currentTimeMillis();
-        getResponse = client().prepareGet("test", "type1", "1").setFields("_ttl").setRealtime(false).execute().actionGet();
+        getResponse = client().prepareGet("test", "type1", "1").setFields("_ttl").setRealtime(false).get();
         if (getResponse.isExists()) {
             ttl0 = ((Number) getResponse.getField("_ttl").getValue()).longValue();
-            assertThat(ttl0, greaterThan(-PURGE_INTERVAL));
-            assertThat(ttl0, lessThan(providedTTLValue - (currentTime - now)));
+            assertThat(ttl0, lessThanOrEqualTo(providedTTLValue - (currentTime - now)));
         } else {
-            assertThat(providedTTLValue - (currentTime - now), lessThan(0l));
+            assertThat(providedTTLValue - (currentTime - now), lessThanOrEqualTo(0l));
         }
         // non realtime get going the replica
         currentTime = System.currentTimeMillis();
-        getResponse = client().prepareGet("test", "type1", "1").setFields("_ttl").setRealtime(false).execute().actionGet();
+        getResponse = client().prepareGet("test", "type1", "1").setFields("_ttl").setRealtime(false).get();
         if (getResponse.isExists()) {
             ttl0 = ((Number) getResponse.getField("_ttl").getValue()).longValue();
-            assertThat(ttl0, greaterThan(-PURGE_INTERVAL));
-            assertThat(ttl0, lessThan(providedTTLValue - (currentTime - now)));
+            assertThat(ttl0, lessThanOrEqualTo(providedTTLValue - (currentTime - now)));
         } else {
-            assertThat(providedTTLValue - (currentTime - now), lessThan(0l));
+            assertThat(providedTTLValue - (currentTime - now), lessThanOrEqualTo(0l));
         }
 
         // no TTL provided so no TTL fetched
@@ -127,6 +137,9 @@ public class SimpleTTLTests extends ElasticsearchIntegrationTest {
         getResponse = client().prepareGet("test", "type2", "default_ttl").setFields("_ttl").setRealtime(true).execute().actionGet();
         ttl0 = ((Number) getResponse.getField("_ttl").getValue()).longValue();
         assertThat(ttl0, greaterThan(0L));
+
+        IndicesStatsResponse response = client().admin().indices().prepareStats("test").clear().setIndexing(true).get();
+        assertThat(response.getIndices().get("test").getTotal().getIndexing().getTotal().getDeleteCount(), equalTo(0L));
 
         // make sure the purger has done its job for all indexed docs that are expired
         long shouldBeExpiredDate = now + providedTTLValue + PURGE_INTERVAL + 2000;
@@ -140,19 +153,19 @@ public class SimpleTTLTests extends ElasticsearchIntegrationTest {
         // But we can use index statistics' delete count to be sure that deletes have been executed, that must be incremented before
         // ttl purging has finished.
         logger.info("--> checking purger");
-        long currentDeleteCount;
-        do {
-            if (rarely()) {
-                client().admin().indices().prepareFlush("test").setFull(true).execute().actionGet();
-            } else if (rarely()) {
-                client().admin().indices().prepareOptimize("test").setMaxNumSegments(1).execute().actionGet();
+        assertThat(awaitBusy(new Predicate<Object>() {
+            @Override
+            public boolean apply(Object input) {
+                if (rarely()) {
+                    client().admin().indices().prepareFlush("test").setFull(true).get();
+                } else if (rarely()) {
+                    client().admin().indices().prepareOptimize("test").setMaxNumSegments(1).get();
+                }
+                IndicesStatsResponse response = client().admin().indices().prepareStats("test").clear().setIndexing(true).get();
+                // TTL deletes two docs, but it is indexed in the primary shard and replica shard.
+                return response.getIndices().get("test").getTotal().getIndexing().getTotal().getDeleteCount() == 2L * test.dataCopies;
             }
-            IndicesStatsResponse response = client().admin().indices().prepareStats("test")
-                    .clear().setIndexing(true)
-                    .execute().actionGet();
-            currentDeleteCount = response.getIndices().get("test").getTotal().getIndexing().getTotal().getDeleteCount();
-        } while (currentDeleteCount < 4); // TTL deletes two docs, but it is indexed in the primary shard and replica shard.
-        assertThat(currentDeleteCount, equalTo(4l));
+        }, 5, TimeUnit.SECONDS), equalTo(true));
 
         // realtime get check
         getResponse = client().prepareGet("test", "type1", "1").setFields("_ttl").setRealtime(true).execute().actionGet();

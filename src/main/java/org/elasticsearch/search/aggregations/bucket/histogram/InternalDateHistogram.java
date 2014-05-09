@@ -18,12 +18,14 @@
  */
 package org.elasticsearch.search.aggregations.bucket.histogram;
 
+import com.carrotsearch.hppc.ObjectObjectOpenHashMap;
+import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.io.stream.StreamInput;
-import org.elasticsearch.index.mapper.core.DateFieldMapper;
 import org.elasticsearch.search.aggregations.AggregationStreams;
 import org.elasticsearch.search.aggregations.InternalAggregations;
-import org.elasticsearch.search.aggregations.support.numeric.ValueFormatter;
+import org.elasticsearch.search.aggregations.support.format.ValueFormatter;
 import org.joda.time.DateTime;
+import org.joda.time.DateTimeZone;
 
 import java.io.IOException;
 import java.util.List;
@@ -51,21 +53,23 @@ public class InternalDateHistogram extends InternalHistogram<InternalDateHistogr
 
     static class Bucket extends InternalHistogram.Bucket implements DateHistogram.Bucket {
 
-        private final ValueFormatter formatter;
-
-        Bucket(long key, long docCount, InternalAggregations aggregations, ValueFormatter formatter) {
-            super(key, docCount, aggregations);
-            this.formatter = formatter;
+        Bucket(long key, long docCount, InternalAggregations aggregations, @Nullable ValueFormatter formatter) {
+            super(key, docCount, formatter, aggregations);
         }
 
         @Override
         public String getKey() {
-            return formatter != null ? formatter.format(key) : DateFieldMapper.Defaults.DATE_TIME_FORMATTER.printer().print(key);
+            return formatter != null ? formatter.format(key) : ValueFormatter.DateTime.DEFAULT.format(key);
         }
 
         @Override
         public DateTime getKeyAsDate() {
-            return new DateTime(key);
+            return new DateTime(key, DateTimeZone.UTC);
+        }
+
+        @Override
+        public String toString() {
+            return getKey();
         }
     }
 
@@ -81,26 +85,45 @@ public class InternalDateHistogram extends InternalHistogram<InternalDateHistogr
 
         @Override
         public InternalDateHistogram create(String name, List<InternalDateHistogram.Bucket> buckets, InternalOrder order,
-                                            long minDocCount, EmptyBucketInfo emptyBucketInfo, ValueFormatter formatter, boolean keyed) {
+                                            long minDocCount, EmptyBucketInfo emptyBucketInfo, @Nullable ValueFormatter formatter, boolean keyed) {
             return new InternalDateHistogram(name, buckets, order, minDocCount, emptyBucketInfo, formatter, keyed);
         }
 
         @Override
-        public InternalDateHistogram.Bucket createBucket(long key, long docCount, InternalAggregations aggregations, ValueFormatter formatter) {
+        public InternalDateHistogram.Bucket createBucket(long key, long docCount, InternalAggregations aggregations, @Nullable ValueFormatter formatter) {
             return new Bucket(key, docCount, aggregations, formatter);
         }
     }
 
+    private ObjectObjectOpenHashMap<String, InternalDateHistogram.Bucket> bucketsMap;
+
     InternalDateHistogram() {} // for serialization
 
     InternalDateHistogram(String name, List<InternalDateHistogram.Bucket> buckets, InternalOrder order, long minDocCount,
-                          EmptyBucketInfo emptyBucketInfo, ValueFormatter formatter, boolean keyed) {
+                          EmptyBucketInfo emptyBucketInfo, @Nullable ValueFormatter formatter, boolean keyed) {
         super(name, buckets, order, minDocCount, emptyBucketInfo, formatter, keyed);
     }
 
     @Override
     public Type type() {
         return TYPE;
+    }
+
+    @Override
+    public Bucket getBucketByKey(String key) {
+        try {
+            long time = Long.parseLong(key);
+            return super.getBucketByKey(time);
+        } catch (NumberFormatException nfe) {
+            // it's not a number, so lets try to parse it as a date using the formatter.
+        }
+        if (bucketsMap == null) {
+            bucketsMap = new ObjectObjectOpenHashMap<>();
+            for (InternalDateHistogram.Bucket bucket : buckets) {
+                bucketsMap.put(bucket.getKey(), bucket);
+            }
+        }
+        return bucketsMap.get(key);
     }
 
     @Override
@@ -112,4 +135,11 @@ public class InternalDateHistogram extends InternalHistogram<InternalDateHistogr
     protected InternalDateHistogram.Bucket createBucket(long key, long docCount, InternalAggregations aggregations, ValueFormatter formatter) {
         return new Bucket(key, docCount, aggregations, formatter);
     }
+
+    @Override
+    public void readFrom(StreamInput in) throws IOException {
+        super.readFrom(in);
+        bucketsMap = null; // we need to reset this on read (as it's lazily created on demand)
+    }
+
 }

@@ -22,7 +22,6 @@ package org.elasticsearch.indices.mapping;
 
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.index.IndexResponse;
-import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
 import org.junit.Test;
@@ -33,6 +32,7 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertHitCount;
 import static org.hamcrest.Matchers.emptyIterable;
 
@@ -50,22 +50,18 @@ public class ConcurrentDynamicTemplateTests extends ElasticsearchIntegrationTest
         // The 'fieldNames' array is used to help with retrieval of index terms
         // after testing
 
-        int iters = atLeast(5);
+        int iters = scaledRandomIntBetween(5, 15);
         for (int i = 0; i < iters; i++) {
-            wipeIndices("test");
-            client().admin().indices().prepareCreate("test")
-                    .setSettings(
-                            ImmutableSettings.settingsBuilder()
-                                    .put("number_of_shards", between(1, 5))
-                                    .put("number_of_replicas", between(0, 1)).build())
-                    .addMapping(mappingType, mapping).execute().actionGet();
+            immutableCluster().wipeIndices("test");
+            assertAcked(prepareCreate("test")
+                    .addMapping(mappingType, mapping));
             ensureYellow();
-            int numDocs = atLeast(10);
+            int numDocs = scaledRandomIntBetween(10, 100);
             final CountDownLatch latch = new CountDownLatch(numDocs);
-            final List<Throwable> throwable = new CopyOnWriteArrayList<Throwable>();
+            final List<Throwable> throwable = new CopyOnWriteArrayList<>();
             int currentID = 0;
             for (int j = 0; j < numDocs; j++) {
-                Map<String, Object> source = new HashMap<String, Object>();
+                Map<String, Object> source = new HashMap<>();
                 source.put(fieldName, "test-user");
                 client().prepareIndex("test", mappingType, Integer.toString(currentID++)).setSource(source).execute(new ActionListener<IndexResponse>() {
                     @Override

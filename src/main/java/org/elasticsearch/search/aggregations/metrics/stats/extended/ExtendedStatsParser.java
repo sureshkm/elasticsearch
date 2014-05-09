@@ -19,22 +19,21 @@
 package org.elasticsearch.search.aggregations.metrics.stats.extended;
 
 import org.elasticsearch.search.aggregations.AggregatorFactory;
-import org.elasticsearch.search.aggregations.metrics.ValuesSourceMetricsAggregatorParser;
+import org.elasticsearch.search.aggregations.metrics.NumericValuesSourceMetricsAggregatorParser;
+import org.elasticsearch.search.aggregations.support.ValuesSource;
 import org.elasticsearch.search.aggregations.support.ValuesSourceConfig;
-import org.elasticsearch.search.aggregations.support.numeric.NumericValuesSource;
 
 /**
  *
  */
-public class ExtendedStatsParser extends ValuesSourceMetricsAggregatorParser<InternalExtendedStats> {
+public class ExtendedStatsParser extends NumericValuesSourceMetricsAggregatorParser<InternalExtendedStats> {
 
-    @Override
-    public String type() {
-        return InternalExtendedStats.TYPE.name();
+    public ExtendedStatsParser() {
+        super(InternalExtendedStats.TYPE);
     }
 
     @Override
-    protected AggregatorFactory createFactory(String aggregationName, ValuesSourceConfig<NumericValuesSource> config) {
+    protected AggregatorFactory createFactory(String aggregationName, ValuesSourceConfig<ValuesSource.Numeric> config) {
         return new ExtendedStatsAggregator.Factory(aggregationName, config);
     }
 }

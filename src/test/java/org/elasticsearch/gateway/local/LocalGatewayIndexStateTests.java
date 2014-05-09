@@ -19,6 +19,7 @@
 
 package org.elasticsearch.gateway.local;
 
+import org.apache.lucene.util.LuceneTestCase.Slow;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthStatus;
 import org.elasticsearch.action.admin.cluster.state.ClusterStateResponse;
@@ -34,21 +35,23 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.gateway.Gateway;
-import org.elasticsearch.test.*;
+import org.elasticsearch.test.ElasticsearchIntegrationTest;
 import org.elasticsearch.test.ElasticsearchIntegrationTest.ClusterScope;
-import org.elasticsearch.test.ElasticsearchIntegrationTest.Scope;
+import org.elasticsearch.test.TestCluster;
 import org.elasticsearch.test.TestCluster.RestartCallback;
 import org.junit.Test;
 
 import static org.elasticsearch.common.settings.ImmutableSettings.settingsBuilder;
 import static org.elasticsearch.index.query.QueryBuilders.matchAllQuery;
+import static org.elasticsearch.test.ElasticsearchIntegrationTest.*;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.nullValue;
 
 /**
  *
  */
-@ClusterScope(scope=Scope.TEST, numNodes=0)
+@ClusterScope(scope= Scope.TEST, numDataNodes =0)
+@Slow
 public class LocalGatewayIndexStateTests extends ElasticsearchIntegrationTest {
 
     private final ESLogger logger = Loggers.getLogger(LocalGatewayIndexStateTests.class);
@@ -96,11 +99,12 @@ public class LocalGatewayIndexStateTests extends ElasticsearchIntegrationTest {
     public void testSimpleOpenClose() throws Exception {
 
         logger.info("--> starting 2 nodes");
-        cluster().startNode(settingsBuilder().put("gateway.type", "local").put("index.number_of_shards", 2).put("index.number_of_replicas", 1).build());
-        cluster().startNode(settingsBuilder().put("gateway.type", "local").put("index.number_of_shards", 2).put("index.number_of_replicas", 1).build());
+        cluster().startNodesAsync(2, settingsBuilder().put("gateway.type", "local").build()).get();
 
         logger.info("--> creating test index");
-        client().admin().indices().prepareCreate("test").execute().actionGet();
+        createIndex("test");
+
+        NumShards test = getNumShards("test");
 
         logger.info("--> waiting for green status");
         ClusterHealthResponse health = client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().setWaitForNodes("2").execute().actionGet();
@@ -108,8 +112,8 @@ public class LocalGatewayIndexStateTests extends ElasticsearchIntegrationTest {
 
         ClusterStateResponse stateResponse = client().admin().cluster().prepareState().execute().actionGet();
         assertThat(stateResponse.getState().metaData().index("test").state(), equalTo(IndexMetaData.State.OPEN));
-        assertThat(stateResponse.getState().routingTable().index("test").shards().size(), equalTo(2));
-        assertThat(stateResponse.getState().routingTable().index("test").shardsWithState(ShardRoutingState.STARTED).size(), equalTo(4));
+        assertThat(stateResponse.getState().routingTable().index("test").shards().size(), equalTo(test.numPrimaries));
+        assertThat(stateResponse.getState().routingTable().index("test").shardsWithState(ShardRoutingState.STARTED).size(), equalTo(test.totalNumShards));
 
         logger.info("--> indexing a simple document");
         client().prepareIndex("test", "type1", "1").setSource("field1", "value1").execute().actionGet();
@@ -151,8 +155,8 @@ public class LocalGatewayIndexStateTests extends ElasticsearchIntegrationTest {
 
         stateResponse = client().admin().cluster().prepareState().execute().actionGet();
         assertThat(stateResponse.getState().metaData().index("test").state(), equalTo(IndexMetaData.State.OPEN));
-        assertThat(stateResponse.getState().routingTable().index("test").shards().size(), equalTo(2));
-        assertThat(stateResponse.getState().routingTable().index("test").shardsWithState(ShardRoutingState.STARTED).size(), equalTo(4));
+        assertThat(stateResponse.getState().routingTable().index("test").shards().size(), equalTo(test.numPrimaries));
+        assertThat(stateResponse.getState().routingTable().index("test").shardsWithState(ShardRoutingState.STARTED).size(), equalTo(test.totalNumShards));
 
         logger.info("--> trying to get the indexed document on the first index");
         GetResponse getResponse = client().prepareGet("test", "type1", "1").execute().actionGet();
@@ -191,8 +195,8 @@ public class LocalGatewayIndexStateTests extends ElasticsearchIntegrationTest {
 
         stateResponse = client().admin().cluster().prepareState().execute().actionGet();
         assertThat(stateResponse.getState().metaData().index("test").state(), equalTo(IndexMetaData.State.OPEN));
-        assertThat(stateResponse.getState().routingTable().index("test").shards().size(), equalTo(2));
-        assertThat(stateResponse.getState().routingTable().index("test").shardsWithState(ShardRoutingState.STARTED).size(), equalTo(4));
+        assertThat(stateResponse.getState().routingTable().index("test").shards().size(), equalTo(test.numPrimaries));
+        assertThat(stateResponse.getState().routingTable().index("test").shardsWithState(ShardRoutingState.STARTED).size(), equalTo(test.totalNumShards));
 
         logger.info("--> trying to get the indexed document on the first round (before close and shutdown)");
         getResponse = client().prepareGet("test", "type1", "1").execute().actionGet();
@@ -207,7 +211,7 @@ public class LocalGatewayIndexStateTests extends ElasticsearchIntegrationTest {
         logger.info("--> cleaning nodes");
 
         logger.info("--> starting 1 master node non data");
-        cluster().startNode(settingsBuilder().put("node.data", false).put("gateway.type", "local").put("index.number_of_shards", 2).put("index.number_of_replicas", 1).build());
+        cluster().startNode(settingsBuilder().put("node.data", false).put("gateway.type", "local").build());
 
         logger.info("--> create an index");
         client().admin().indices().prepareCreate("test").execute().actionGet();
@@ -216,7 +220,7 @@ public class LocalGatewayIndexStateTests extends ElasticsearchIntegrationTest {
         cluster().closeNonSharedNodes(false);
 
         logger.info("--> starting 1 master node non data again");
-        cluster().startNode(settingsBuilder().put("node.data", false).put("gateway.type", "local").put("index.number_of_shards", 2).put("index.number_of_replicas", 1).build());
+        cluster().startNode(settingsBuilder().put("node.data", false).put("gateway.type", "local").build());
 
         logger.info("--> waiting for test index to be created");
         ClusterHealthResponse health = client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setIndices("test").execute().actionGet();
@@ -232,8 +236,8 @@ public class LocalGatewayIndexStateTests extends ElasticsearchIntegrationTest {
         logger.info("--> cleaning nodes");
 
         logger.info("--> starting 1 master node non data");
-        cluster().startNode(settingsBuilder().put("node.data", false).put("gateway.type", "local").put("index.number_of_shards", 2).put("index.number_of_replicas", 1).build());
-        cluster().startNode(settingsBuilder().put("node.master", false).put("gateway.type", "local").put("index.number_of_shards", 2).put("index.number_of_replicas", 1).build());
+        cluster().startNode(settingsBuilder().put("node.data", false).put("gateway.type", "local").build());
+        cluster().startNode(settingsBuilder().put("node.master", false).put("gateway.type", "local").build());
 
         logger.info("--> create an index");
         client().admin().indices().prepareCreate("test").execute().actionGet();
@@ -250,8 +254,8 @@ public class LocalGatewayIndexStateTests extends ElasticsearchIntegrationTest {
         logger.info("--> cleaning nodes");
 
         logger.info("--> starting 2 nodes");
-        cluster().startNode(settingsBuilder().put("gateway.type", "local").put("index.number_of_shards", 5).put("index.number_of_replicas", 1).build());
-        cluster().startNode(settingsBuilder().put("gateway.type", "local").put("index.number_of_shards", 5).put("index.number_of_replicas", 1).build());
+        cluster().startNode(settingsBuilder().put("gateway.type", "local").build());
+        cluster().startNode(settingsBuilder().put("gateway.type", "local").build());
 
         logger.info("--> indexing a simple document");
         client().prepareIndex("test", "type1", "1").setSource("field1", "value1").setRefresh(true).execute().actionGet();
@@ -291,7 +295,6 @@ public class LocalGatewayIndexStateTests extends ElasticsearchIntegrationTest {
     public void testDanglingIndicesAutoImportYes() throws Exception {
         Settings settings = settingsBuilder()
                 .put("gateway.type", "local").put("gateway.local.auto_import_dangled", "yes")
-                .put("index.number_of_shards", 1).put("index.number_of_replicas", 1)
                 .build();
         logger.info("--> starting two nodes");
         final String node_1 = cluster().startNode(settings);
@@ -349,7 +352,6 @@ public class LocalGatewayIndexStateTests extends ElasticsearchIntegrationTest {
     public void testDanglingIndicesAutoImportClose() throws Exception {
         Settings settings = settingsBuilder()
                 .put("gateway.type", "local").put("gateway.local.auto_import_dangled", "closed")
-                .put("index.number_of_shards", 1).put("index.number_of_replicas", 1)
                 .build();
   
 
@@ -417,7 +419,6 @@ public class LocalGatewayIndexStateTests extends ElasticsearchIntegrationTest {
     public void testDanglingIndicesNoAutoImport() throws Exception {
         Settings settings = settingsBuilder()
                 .put("gateway.type", "local").put("gateway.local.auto_import_dangled", "no")
-                .put("index.number_of_shards", 1).put("index.number_of_replicas", 1)
                 .build();
         logger.info("--> starting two nodes");
         final String node_1 = cluster().startNode(settings);
@@ -483,7 +484,6 @@ public class LocalGatewayIndexStateTests extends ElasticsearchIntegrationTest {
     public void testDanglingIndicesNoAutoImportStillDanglingAndCreatingSameIndex() throws Exception {
         Settings settings = settingsBuilder()
                 .put("gateway.type", "local").put("gateway.local.auto_import_dangled", "no")
-                .put("index.number_of_shards", 1).put("index.number_of_replicas", 1)
                 .build();
 
         logger.info("--> starting two nodes");

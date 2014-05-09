@@ -1,16 +1,11 @@
 ---
-setup:
-  - skip:
-      features: regex
-
----
 "Help":
   - do:
       cat.aliases:
         help: true
 
   - match:
-      $body: >
+      $body: |
                /^  alias            .+   \n
                    index            .+   \n
                    filter           .+   \n
@@ -25,7 +20,7 @@ setup:
       cat.aliases: {}
 
   - match:
-      $body: >
+      $body: |
             /^
             $/
 
@@ -45,7 +40,7 @@ setup:
       cat.aliases: {}
 
   - match:
-      $body: >
+      $body: |
                 /^
                     test_alias          \s+
                     test                \s+
@@ -75,7 +70,7 @@ setup:
       cat.aliases: {}
 
   - match:
-      $body: >
+      $body: |
                 /^
                     test_alias          \s+
                     test                \s+
@@ -142,7 +137,7 @@ setup:
             v: true
 
   - match:
-      $body: >
+      $body: |
                /^  alias           \s+
                    index           \s+
                    filter          \s+
@@ -182,7 +177,7 @@ setup:
             h:      [index, alias]
             v:      true
   - match:
-      $body: >
+      $body: |
             /^
                 index \s+ alias  \s+ \n
                 test  \s+ test_1 \s+ \n

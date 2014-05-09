@@ -150,11 +150,11 @@ public class FiltersFunctionScoreQuery extends Query {
         }
 
         @Override
-        public Scorer scorer(AtomicReaderContext context, boolean scoreDocsInOrder, boolean topScorer, Bits acceptDocs) throws IOException {
+        public Scorer scorer(AtomicReaderContext context, Bits acceptDocs) throws IOException {
             // we ignore scoreDocsInOrder parameter, because we need to score in
             // order if documents are scored with a script. The
             // ShardLookup depends on in order scoring.
-            Scorer subQueryScorer = subQueryWeight.scorer(context, true, false, acceptDocs);
+            Scorer subQueryScorer = subQueryWeight.scorer(context, acceptDocs);
             if (subQueryScorer == null) {
                 return null;
             }
@@ -174,7 +174,7 @@ public class FiltersFunctionScoreQuery extends Query {
                 return subQueryExpl;
             }
             // First: Gather explanations for all filters
-            List<ComplexExplanation> filterExplanations = new ArrayList<ComplexExplanation>();
+            List<ComplexExplanation> filterExplanations = new ArrayList<>();
             for (FilterFunction filterFunction : filterFunctions) {
                 Bits docSet = DocIdSets.toSafeBits(context.reader(),
                         filterFunction.filter.getDocIdSet(context, context.reader().getLiveDocs()));

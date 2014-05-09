@@ -31,6 +31,7 @@ import org.elasticsearch.index.search.nested.NonNestedDocsFilter;
 import org.elasticsearch.search.aggregations.*;
 import org.elasticsearch.search.aggregations.bucket.SingleBucketAggregator;
 import org.elasticsearch.search.aggregations.support.AggregationContext;
+import org.elasticsearch.search.internal.SearchContext;
 
 import java.io.IOException;
 
@@ -39,31 +40,50 @@ import java.io.IOException;
  */
 public class NestedAggregator extends SingleBucketAggregator implements ReaderContextAware {
 
-    private final Filter parentFilter;
+    private final String nestedPath;
+    private final Aggregator parentAggregator;
+    private Filter parentFilter;
     private final Filter childFilter;
 
     private Bits childDocs;
     private FixedBitSet parentDocs;
 
-    public NestedAggregator(String name, AggregatorFactories factories, String nestedPath, AggregationContext aggregationContext, Aggregator parent) {
-        super(name, factories, aggregationContext, parent);
+    public NestedAggregator(String name, AggregatorFactories factories, String nestedPath, AggregationContext aggregationContext, Aggregator parentAggregator) {
+        super(name, factories, aggregationContext, parentAggregator);
+        this.nestedPath = nestedPath;
+        this.parentAggregator = parentAggregator;
         MapperService.SmartNameObjectMapper mapper = aggregationContext.searchContext().smartNameObjectMapper(nestedPath);
         if (mapper == null) {
-            throw new AggregationExecutionException("facet nested path [" + nestedPath + "] not found");
+            throw new AggregationExecutionException("[nested] nested path [" + nestedPath + "] not found");
         }
         ObjectMapper objectMapper = mapper.mapper();
         if (objectMapper == null) {
-            throw new AggregationExecutionException("facet nested path [" + nestedPath + "] not found");
+            throw new AggregationExecutionException("[nested] nested path [" + nestedPath + "] not found");
         }
         if (!objectMapper.nested().isNested()) {
-            throw new AggregationExecutionException("facet nested path [" + nestedPath + "] is not nested");
+            throw new AggregationExecutionException("[nested] nested path [" + nestedPath + "] is not nested");
         }
-        parentFilter = aggregationContext.searchContext().filterCache().cache(NonNestedDocsFilter.INSTANCE);
+
         childFilter = aggregationContext.searchContext().filterCache().cache(objectMapper.nestedTypeFilter());
     }
 
     @Override
     public void setNextReader(AtomicReaderContext reader) {
+        if (parentFilter == null) {
+            NestedAggregator closestNestedAggregator = findClosestNestedAggregator(parentAggregator);
+            final Filter parentFilterNotCached;
+            if (closestNestedAggregator == null) {
+                parentFilterNotCached = NonNestedDocsFilter.INSTANCE;
+            } else {
+                // The aggs are instantiated in reverse, first the most inner nested aggs and lastly the top level aggs
+                // So at the time a nested 'nested' aggs is parsed its closest parent nested aggs hasn't been constructed.
+                // So the trick to set at the last moment just before needed and we can use its child filter as the
+                // parent filter.
+                parentFilterNotCached = closestNestedAggregator.childFilter;
+            }
+            parentFilter = SearchContext.current().filterCache().cache(parentFilterNotCached);
+        }
+
         try {
             DocIdSet docIdSet = parentFilter.getDocIdSet(reader, null);
             // In ES if parent is deleted, then also the children are deleted. Therefore acceptedDocs can also null here.
@@ -106,6 +126,19 @@ public class NestedAggregator extends SingleBucketAggregator implements ReaderCo
     @Override
     public InternalAggregation buildEmptyAggregation() {
         return new InternalNested(name, 0, buildEmptySubAggregations());
+    }
+
+    public String getNestedPath() {
+        return nestedPath;
+    }
+
+    static NestedAggregator findClosestNestedAggregator(Aggregator parent) {
+        for (; parent != null; parent = parent.parent()) {
+            if (parent instanceof NestedAggregator) {
+                return (NestedAggregator) parent;
+            }
+        }
+        return null;
     }
 
     public static class Factory extends AggregatorFactory {

@@ -35,7 +35,6 @@ import org.elasticsearch.nodesinfo.plugin.dummy1.TestPlugin;
 import org.elasticsearch.nodesinfo.plugin.dummy2.TestNoVersionPlugin;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
 import org.elasticsearch.test.ElasticsearchIntegrationTest.ClusterScope;
-import org.elasticsearch.test.ElasticsearchIntegrationTest.Scope;
 import org.junit.Test;
 
 import java.io.File;
@@ -49,12 +48,13 @@ import static com.google.common.base.Predicates.isNull;
 import static org.elasticsearch.client.Requests.clusterHealthRequest;
 import static org.elasticsearch.client.Requests.nodesInfoRequest;
 import static org.elasticsearch.common.settings.ImmutableSettings.settingsBuilder;
+import static org.elasticsearch.test.ElasticsearchIntegrationTest.*;
 import static org.hamcrest.Matchers.*;
 
 /**
  *
  */
-@ClusterScope(scope=Scope.TEST, numNodes=0)
+@ClusterScope(scope= Scope.TEST, numDataNodes =0)
 public class SimpleNodesInfoTests extends ElasticsearchIntegrationTest {
 
     static final class Fields {
@@ -65,9 +65,10 @@ public class SimpleNodesInfoTests extends ElasticsearchIntegrationTest {
 
 
     @Test
-    public void testNodesInfos() {
-        final String node_1 = cluster().startNode();
-        final String node_2 = cluster().startNode();
+    public void testNodesInfos() throws Exception {
+        List<String> nodesIds = cluster().startNodesAsync(2).get();
+        final String node_1 = nodesIds.get(0);
+        final String node_2 = nodesIds.get(1);
 
         ClusterHealthResponse clusterHealth = client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus()).actionGet();
         logger.info("--> done cluster_health, status " + clusterHealth.getStatus());

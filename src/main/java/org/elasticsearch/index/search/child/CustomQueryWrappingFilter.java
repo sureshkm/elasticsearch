@@ -27,6 +27,7 @@ import org.elasticsearch.common.lease.Releasable;
 import org.elasticsearch.common.lucene.docset.DocIdSets;
 import org.elasticsearch.common.lucene.search.NoCacheFilter;
 import org.elasticsearch.search.internal.SearchContext;
+import org.elasticsearch.search.internal.SearchContext.Lifetime;
 
 import java.io.IOException;
 import java.util.IdentityHashMap;
@@ -64,16 +65,16 @@ public class CustomQueryWrappingFilter extends NoCacheFilter implements Releasab
         if (docIdSets == null) {
             assert searcher == null;
             IndexSearcher searcher = searchContext.searcher();
-            docIdSets = new IdentityHashMap<AtomicReader, DocIdSet>();
+            docIdSets = new IdentityHashMap<>();
             this.searcher = searcher;
-            searchContext.addReleasable(this);
+            searchContext.addReleasable(this, Lifetime.COLLECTION);
 
             final Weight weight = searcher.createNormalizedWeight(query);
             for (final AtomicReaderContext leaf : searcher.getTopReaderContext().leaves()) {
                 final DocIdSet set = DocIdSets.toCacheable(leaf.reader(), new DocIdSet() {
                     @Override
                     public DocIdSetIterator iterator() throws IOException {
-                        return weight.scorer(leaf, true, false, null);
+                        return weight.scorer(leaf, null);
                     }
                     @Override
                     public boolean isCacheable() { return false; }
@@ -91,12 +92,11 @@ public class CustomQueryWrappingFilter extends NoCacheFilter implements Releasab
     }
 
     @Override
-    public boolean release() throws ElasticsearchException {
+    public void close() throws ElasticsearchException {
         // We need to clear the docIdSets, otherwise this is leaved unused
         // DocIdSets around and can potentially become a memory leak.
         docIdSets = null;
         searcher = null;
-        return true;
     }
 
     @Override
@@ -120,5 +120,16 @@ public class CustomQueryWrappingFilter extends NoCacheFilter implements Releasab
     @Override
     public int hashCode() {
         return query.hashCode() ^ 0x823D64C9;
+    }
+
+    /** @return Whether {@link CustomQueryWrappingFilter} should be used. */
+    public static boolean shouldUseCustomQueryWrappingFilter(Query query) {
+        if (query instanceof TopChildrenQuery || query instanceof ChildrenConstantScoreQuery
+                || query instanceof ChildrenQuery || query instanceof ParentConstantScoreQuery
+                || query instanceof ParentQuery) {
+            return true;
+        } else {
+            return false;
+        }
     }
 }

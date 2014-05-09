@@ -29,6 +29,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.elasticsearch.common.settings.ImmutableSettings.settingsBuilder;
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.nullValue;
 
@@ -41,13 +42,12 @@ public class ConcurrentDocumentOperationTests extends ElasticsearchIntegrationTe
     public void concurrentOperationOnSameDocTest() throws Exception {
 
         logger.info("--> create an index with 1 shard and max replicas based on nodes");
-        client().admin().indices().prepareCreate("test")
-                .setSettings(settingsBuilder().put("index.number_of_shards", 1).put("index.number_of_replicas", cluster().size()-1))
-                .execute().actionGet();
+        assertAcked(prepareCreate("test")
+                .setSettings(settingsBuilder().put(indexSettings()).put("index.number_of_shards", 1)));
 
         logger.info("execute concurrent updates on the same doc");
         int numberOfUpdates = 100;
-        final AtomicReference<Throwable> failure = new AtomicReference<Throwable>();
+        final AtomicReference<Throwable> failure = new AtomicReference<>();
         final CountDownLatch latch = new CountDownLatch(numberOfUpdates);
         for (int i = 0; i < numberOfUpdates; i++) {
             client().prepareIndex("test", "type1", "1").setSource("field1", i).execute(new ActionListener<IndexResponse>() {
@@ -73,7 +73,7 @@ public class ConcurrentDocumentOperationTests extends ElasticsearchIntegrationTe
 
         logger.info("done indexing, check all have the same field value");
         Map masterSource = client().prepareGet("test", "type1", "1").execute().actionGet().getSourceAsMap();
-        for (int i = 0; i < (cluster().size() * 5); i++) {
+        for (int i = 0; i < (immutableCluster().size() * 5); i++) {
             assertThat(client().prepareGet("test", "type1", "1").execute().actionGet().getSourceAsMap(), equalTo(masterSource));
         }
     }

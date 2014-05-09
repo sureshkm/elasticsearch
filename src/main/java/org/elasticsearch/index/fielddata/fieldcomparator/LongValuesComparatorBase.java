@@ -22,6 +22,7 @@ import org.apache.lucene.index.AtomicReaderContext;
 import org.apache.lucene.search.FieldComparator;
 import org.elasticsearch.index.fielddata.IndexNumericFieldData;
 import org.elasticsearch.index.fielddata.LongValues;
+import org.elasticsearch.search.MultiValueMode;
 
 import java.io.IOException;
 
@@ -31,10 +32,10 @@ abstract class LongValuesComparatorBase<T extends Number> extends NumberComparat
     protected final long missingValue;
     protected long bottom;
     protected LongValues readerValues;
-    protected final SortMode sortMode;
+    protected final MultiValueMode sortMode;
 
 
-    public LongValuesComparatorBase(IndexNumericFieldData<?> indexFieldData, long missingValue, SortMode sortMode) {
+    public LongValuesComparatorBase(IndexNumericFieldData<?> indexFieldData, long missingValue, MultiValueMode sortMode) {
         this.indexFieldData = indexFieldData;
         this.missingValue = missingValue;
         this.sortMode = sortMode;
@@ -43,24 +44,12 @@ abstract class LongValuesComparatorBase<T extends Number> extends NumberComparat
     @Override
     public final int compareBottom(int doc) throws IOException {
         long v2 = sortMode.getRelevantValue(readerValues, doc, missingValue);
-        return compare(bottom, v2);
+        return Long.compare(bottom, v2);
     }
 
     @Override
-    public final int compareDocToValue(int doc, T valueObj) throws IOException {
-        final long value = valueObj.longValue();
-        long docValue = sortMode.getRelevantValue(readerValues, doc, missingValue);
-        return compare(docValue, value);
-    }
-
-    static final int compare(long left, long right) {
-        if (left > right) {
-            return 1;
-        } else if (left < right) {
-            return -1;
-        } else {
-            return 0;
-        }
+    public int compareTop(int doc) throws IOException {
+        return Long.compare(top.longValue(), sortMode.getRelevantValue(readerValues, doc, missingValue));
     }
 
     @Override
@@ -71,6 +60,11 @@ abstract class LongValuesComparatorBase<T extends Number> extends NumberComparat
 
     @Override
     public int compareBottomMissing() {
-        return compare(bottom, missingValue);
+        return Long.compare(bottom, missingValue);
+    }
+
+    @Override
+    public int compareTopMissing() {
+        return Long.compare(top.longValue(), missingValue);
     }
 }

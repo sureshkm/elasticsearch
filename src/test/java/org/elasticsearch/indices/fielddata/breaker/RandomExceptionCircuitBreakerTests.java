@@ -46,6 +46,7 @@ import java.util.Random;
 import java.util.concurrent.ExecutionException;
 
 import static org.elasticsearch.common.settings.ImmutableSettings.settingsBuilder;
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAllSuccessful;
 import static org.hamcrest.Matchers.equalTo;
 
 /**
@@ -55,8 +56,11 @@ public class RandomExceptionCircuitBreakerTests extends ElasticsearchIntegration
 
     @Test
     public void testBreakerWithRandomExceptions() throws IOException, InterruptedException, ExecutionException {
-        final int numShards = between(1, 5);
-        final int numReplicas = randomIntBetween(0, 1);
+        for (NodeStats node : client().admin().cluster().prepareNodesStats()
+                .clear().setBreaker(true).execute().actionGet().getNodes()) {
+            assertThat("Breaker is not set to 0", node.getBreaker().getEstimated(), equalTo(0L));
+        }
+
         String mapping = XContentFactory.jsonBuilder()
                 .startObject()
                 .startObject("type")
@@ -101,8 +105,7 @@ public class RandomExceptionCircuitBreakerTests extends ElasticsearchIntegration
         }
 
         ImmutableSettings.Builder settings = settingsBuilder()
-                .put("index.number_of_shards", numShards)
-                .put("index.number_of_replicas", numReplicas)
+                .put(indexSettings())
                 .put(MockInternalEngine.READER_WRAPPER_TYPE, RandomExceptionDirectoryReaderWrapper.class.getName())
                 .put(EXCEPTION_TOP_LEVEL_RATIO_KEY, topLevelRate)
                 .put(EXCEPTION_LOW_LEVEL_RATIO_KEY, lowLevelRate)
@@ -137,7 +140,7 @@ public class RandomExceptionCircuitBreakerTests extends ElasticsearchIntegration
         logger.info("Refresh failed: [{}] numShardsFailed: [{}], shardFailuresLength: [{}], successfulShards: [{}], totalShards: [{}] ",
                 refreshFailed, refreshResponse.getFailedShards(), refreshResponse.getShardFailures().length,
                 refreshResponse.getSuccessfulShards(), refreshResponse.getTotalShards());
-        final int numSearches = atLeast(50);
+        final int numSearches = scaledRandomIntBetween(50, 150);
         NodesStatsResponse resp = client().admin().cluster().prepareNodesStats()
                 .clear().setBreaker(true).execute().actionGet();
         for (NodeStats stats : resp.getNodes()) {
@@ -172,7 +175,8 @@ public class RandomExceptionCircuitBreakerTests extends ElasticsearchIntegration
                 // successfully set back to zero. If there is a bug in the circuit
                 // breaker adjustment code, it should show up here by the breaker
                 // estimate being either positive or negative.
-                client().admin().indices().prepareClearCache("test").setFieldDataCache(true).execute().actionGet();
+                ensureGreen("test");  // make sure all shards are there - there could be shards that are still starting up.
+                assertAllSuccessful(client().admin().indices().prepareClearCache("test").setFieldDataCache(true).execute().actionGet());
                 NodesStatsResponse nodeStats = client().admin().cluster().prepareNodesStats()
                     .clear().setBreaker(true).execute().actionGet();
                 for (NodeStats stats : nodeStats.getNodes()) {
@@ -181,6 +185,8 @@ public class RandomExceptionCircuitBreakerTests extends ElasticsearchIntegration
             }
         }
     }
+
+
 
     public static final String EXCEPTION_TOP_LEVEL_RATIO_KEY = "index.engine.exception.ratio.top";
     public static final String EXCEPTION_LOW_LEVEL_RATIO_KEY = "index.engine.exception.ratio.low";
@@ -194,7 +200,7 @@ public class RandomExceptionCircuitBreakerTests extends ElasticsearchIntegration
             private final double lowLevelRatio;
 
             ThrowingSubReaderWrapper(Settings settings) {
-                final long seed = settings.getAsLong(ElasticsearchIntegrationTest.INDEX_SEED_SETTING, 0l);
+                final long seed = settings.getAsLong(SETTING_INDEX_SEED, 0l);
                 this.topLevelRatio = settings.getAsDouble(EXCEPTION_TOP_LEVEL_RATIO_KEY, 0.1d);
                 this.lowLevelRatio = settings.getAsDouble(EXCEPTION_LOW_LEVEL_RATIO_KEY, 0.1d);
                 this.random = new Random(seed);

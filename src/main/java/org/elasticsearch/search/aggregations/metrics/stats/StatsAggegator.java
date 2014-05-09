@@ -29,9 +29,9 @@ import org.elasticsearch.search.aggregations.Aggregator;
 import org.elasticsearch.search.aggregations.InternalAggregation;
 import org.elasticsearch.search.aggregations.metrics.MetricsAggregator;
 import org.elasticsearch.search.aggregations.support.AggregationContext;
-import org.elasticsearch.search.aggregations.support.ValueSourceAggregatorFactory;
+import org.elasticsearch.search.aggregations.support.ValuesSource;
+import org.elasticsearch.search.aggregations.support.ValuesSourceAggregatorFactory;
 import org.elasticsearch.search.aggregations.support.ValuesSourceConfig;
-import org.elasticsearch.search.aggregations.support.numeric.NumericValuesSource;
 
 import java.io.IOException;
 
@@ -40,7 +40,7 @@ import java.io.IOException;
  */
 public class StatsAggegator extends MetricsAggregator.MultiValue {
 
-    private final NumericValuesSource valuesSource;
+    private final ValuesSource.Numeric valuesSource;
     private DoubleValues values;
 
     private LongArray counts;
@@ -48,16 +48,16 @@ public class StatsAggegator extends MetricsAggregator.MultiValue {
     private DoubleArray mins;
     private DoubleArray maxes;
 
-    public StatsAggegator(String name, long estimatedBucketsCount, NumericValuesSource valuesSource, AggregationContext context, Aggregator parent) {
+    public StatsAggegator(String name, long estimatedBucketsCount, ValuesSource.Numeric valuesSource, AggregationContext context, Aggregator parent) {
         super(name, estimatedBucketsCount, context, parent);
         this.valuesSource = valuesSource;
         if (valuesSource != null) {
             final long initialSize = estimatedBucketsCount < 2 ? 1 : estimatedBucketsCount;
-            counts = BigArrays.newLongArray(initialSize, context.pageCacheRecycler(), true);
-            sums = BigArrays.newDoubleArray(initialSize, context.pageCacheRecycler(), true);
-            mins = BigArrays.newDoubleArray(initialSize, context.pageCacheRecycler(), false);
+            counts = bigArrays.newLongArray(initialSize, true);
+            sums = bigArrays.newDoubleArray(initialSize, true);
+            mins = bigArrays.newDoubleArray(initialSize, false);
             mins.fill(0, mins.size(), Double.POSITIVE_INFINITY);
-            maxes = BigArrays.newDoubleArray(initialSize, context.pageCacheRecycler(), false);
+            maxes = bigArrays.newDoubleArray(initialSize, false);
             maxes.fill(0, maxes.size(), Double.NEGATIVE_INFINITY);
         }
     }
@@ -77,10 +77,10 @@ public class StatsAggegator extends MetricsAggregator.MultiValue {
         if (owningBucketOrdinal >= counts.size()) {
             final long from = counts.size();
             final long overSize = BigArrays.overSize(owningBucketOrdinal + 1);
-            counts = BigArrays.resize(counts, overSize);
-            sums = BigArrays.resize(sums, overSize);
-            mins = BigArrays.resize(mins, overSize);
-            maxes = BigArrays.resize(maxes, overSize);
+            counts = bigArrays.resize(counts, overSize);
+            sums = bigArrays.resize(sums, overSize);
+            mins = bigArrays.resize(mins, overSize);
+            maxes = bigArrays.resize(maxes, overSize);
             mins.fill(from, overSize, Double.POSITIVE_INFINITY);
             maxes.fill(from, overSize, Double.NEGATIVE_INFINITY);
         }
@@ -138,9 +138,9 @@ public class StatsAggegator extends MetricsAggregator.MultiValue {
         return new InternalStats(name, 0, 0, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY);
     }
 
-    public static class Factory extends ValueSourceAggregatorFactory.LeafOnly<NumericValuesSource> {
+    public static class Factory extends ValuesSourceAggregatorFactory.LeafOnly<ValuesSource.Numeric> {
 
-        public Factory(String name, ValuesSourceConfig<NumericValuesSource> valuesSourceConfig) {
+        public Factory(String name, ValuesSourceConfig<ValuesSource.Numeric> valuesSourceConfig) {
             super(name, InternalStats.TYPE.name(), valuesSourceConfig);
         }
 
@@ -150,13 +150,13 @@ public class StatsAggegator extends MetricsAggregator.MultiValue {
         }
 
         @Override
-        protected Aggregator create(NumericValuesSource valuesSource, long expectedBucketsCount, AggregationContext aggregationContext, Aggregator parent) {
+        protected Aggregator create(ValuesSource.Numeric valuesSource, long expectedBucketsCount, AggregationContext aggregationContext, Aggregator parent) {
             return new StatsAggegator(name, expectedBucketsCount, valuesSource, aggregationContext, parent);
         }
     }
 
     @Override
-    public void doRelease() {
-        Releasables.release(counts, maxes, mins, sums);
+    public void doClose() {
+        Releasables.close(counts, maxes, mins, sums);
     }
 }

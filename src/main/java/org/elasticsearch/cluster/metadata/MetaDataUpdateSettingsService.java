@@ -22,6 +22,7 @@ package org.elasticsearch.cluster.metadata;
 import com.google.common.collect.Sets;
 import org.elasticsearch.ElasticsearchIllegalArgumentException;
 import org.elasticsearch.action.admin.indices.settings.put.UpdateSettingsClusterStateUpdateRequest;
+import org.elasticsearch.action.support.IndicesOptions;
 import org.elasticsearch.cluster.*;
 import org.elasticsearch.cluster.ack.ClusterStateUpdateListener;
 import org.elasticsearch.cluster.ack.ClusterStateUpdateResponse;
@@ -70,7 +71,7 @@ public class MetaDataUpdateSettingsService extends AbstractComponent implements 
             return;
         }
 
-        Map<Integer, List<String>> nrReplicasChanged = new HashMap<Integer, List<String>>();
+        Map<Integer, List<String>> nrReplicasChanged = new HashMap<>();
 
         // we need to do this each time in case it was changed by update settings
         for (final IndexMetaData indexMetaData : event.state().metaData()) {
@@ -228,7 +229,7 @@ public class MetaDataUpdateSettingsService extends AbstractComponent implements 
 
             @Override
             public ClusterState execute(ClusterState currentState) {
-                String[] actualIndices = currentState.metaData().concreteIndices(request.indices());
+                String[] actualIndices = currentState.metaData().concreteIndices(request.indices(), IndicesOptions.strictExpand());
                 RoutingTable.Builder routingTableBuilder = RoutingTable.builder(currentState.routingTable());
                 MetaData.Builder metaDataBuilder = MetaData.builder(currentState.metaData());
 

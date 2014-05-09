@@ -21,7 +21,6 @@ package org.elasticsearch.action.search.type;
 
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.search.ReduceSearchPhaseException;
-import org.elasticsearch.action.search.SearchOperationThreading;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.cluster.ClusterService;
@@ -64,7 +63,7 @@ public class TransportSearchDfsQueryAndFetchAction extends TransportSearchTypeAc
 
         private AsyncAction(SearchRequest request, ActionListener<SearchResponse> listener) {
             super(request, listener);
-            queryFetchResults = new AtomicArray<QueryFetchSearchResult>(firstResults.length());
+            queryFetchResults = new AtomicArray<>(firstResults.length());
         }
 
         @Override
@@ -82,56 +81,11 @@ public class TransportSearchDfsQueryAndFetchAction extends TransportSearchTypeAc
             final AggregatedDfs dfs = searchPhaseController.aggregateDfs(firstResults);
             final AtomicInteger counter = new AtomicInteger(firstResults.asList().size());
 
-            int localOperations = 0;
             for (final AtomicArray.Entry<DfsSearchResult> entry : firstResults.asList()) {
                 DfsSearchResult dfsResult = entry.value;
                 DiscoveryNode node = nodes.get(dfsResult.shardTarget().nodeId());
-                if (node.id().equals(nodes.localNodeId())) {
-                    localOperations++;
-                } else {
-                    QuerySearchRequest querySearchRequest = new QuerySearchRequest(request, dfsResult.id(), dfs);
-                    executeSecondPhase(entry.index, dfsResult, counter, node, querySearchRequest);
-                }
-            }
-            if (localOperations > 0) {
-                if (request.operationThreading() == SearchOperationThreading.SINGLE_THREAD) {
-                    threadPool.executor(ThreadPool.Names.SEARCH).execute(new Runnable() {
-                        @Override
-                        public void run() {
-                            for (final AtomicArray.Entry<DfsSearchResult> entry : firstResults.asList()) {
-                                DfsSearchResult dfsResult = entry.value;
-                                DiscoveryNode node = nodes.get(dfsResult.shardTarget().nodeId());
-                                if (node.id().equals(nodes.localNodeId())) {
-                                    QuerySearchRequest querySearchRequest = new QuerySearchRequest(request, dfsResult.id(), dfs);
-                                    executeSecondPhase(entry.index, dfsResult, counter, node, querySearchRequest);
-                                }
-                            }
-                        }
-                    });
-                } else {
-                    boolean localAsync = request.operationThreading() == SearchOperationThreading.THREAD_PER_SHARD;
-                    for (final AtomicArray.Entry<DfsSearchResult> entry : firstResults.asList()) {
-                        final DfsSearchResult dfsResult = entry.value;
-                        final DiscoveryNode node = nodes.get(dfsResult.shardTarget().nodeId());
-                        if (node.id().equals(nodes.localNodeId())) {
-                            final QuerySearchRequest querySearchRequest = new QuerySearchRequest(request, dfsResult.id(), dfs);
-                            try {
-                                if (localAsync) {
-                                    threadPool.executor(ThreadPool.Names.SEARCH).execute(new Runnable() {
-                                        @Override
-                                        public void run() {
-                                            executeSecondPhase(entry.index, dfsResult, counter, node, querySearchRequest);
-                                        }
-                                    });
-                                } else {
-                                    executeSecondPhase(entry.index, dfsResult, counter, node, querySearchRequest);
-                                }
-                            } catch (Throwable t) {
-                                onSecondPhaseFailure(t, querySearchRequest, entry.index, dfsResult, counter);
-                            }
-                        }
-                    }
-                }
+                QuerySearchRequest querySearchRequest = new QuerySearchRequest(request, dfsResult.id(), dfs);
+                executeSecondPhase(entry.index, dfsResult, counter, node, querySearchRequest);
             }
         }
 
@@ -158,7 +112,7 @@ public class TransportSearchDfsQueryAndFetchAction extends TransportSearchTypeAc
                 logger.debug("[{}] Failed to execute query phase", t, querySearchRequest.id());
             }
             this.addShardFailure(shardIndex, dfsResult.shardTarget(), t);
-            successulOps.decrementAndGet();
+            successfulOps.decrementAndGet();
             if (counter.decrementAndGet() == 0) {
                 finishHim();
             }
@@ -179,13 +133,13 @@ public class TransportSearchDfsQueryAndFetchAction extends TransportSearchTypeAc
         }
 
         void innerFinishHim() throws Exception {
-            sortedShardList = searchPhaseController.sortDocs(queryFetchResults);
+            sortedShardList = searchPhaseController.sortDocs(request, useSlowScroll, queryFetchResults);
             final InternalSearchResponse internalResponse = searchPhaseController.merge(sortedShardList, queryFetchResults, queryFetchResults);
             String scrollId = null;
             if (request.scroll() != null) {
                 scrollId = TransportSearchHelper.buildScrollId(request.searchType(), firstResults, null);
             }
-            listener.onResponse(new SearchResponse(internalResponse, scrollId, expectedSuccessfulOps, successulOps.get(), buildTookInMillis(), buildShardFailures()));
+            listener.onResponse(new SearchResponse(internalResponse, scrollId, expectedSuccessfulOps, successfulOps.get(), buildTookInMillis(), buildShardFailures()));
         }
     }
 }

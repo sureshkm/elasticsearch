@@ -144,7 +144,8 @@ public abstract class AbstractRandomizedTest extends RandomizedTest {
      * @see #classRules
      */
     private static final String[] IGNORED_INVARIANT_PROPERTIES = {
-            "user.timezone", "java.rmi.server.randomIDs", "sun.nio.ch.bugLevel"
+            "user.timezone", "java.rmi.server.randomIDs", "sun.nio.ch.bugLevel",
+            "solr.directoryFactory", "solr.solr.home", "solr.data.dir" // these might be set by the LuceneTestCase -- ignore
     };
 
     // -----------------------------------------------------------------
@@ -200,7 +201,7 @@ public abstract class AbstractRandomizedTest extends RandomizedTest {
         }
 
         ignoreAfterMaxFailuresDelegate =
-                new AtomicReference<TestRuleIgnoreAfterMaxFailures>(
+                new AtomicReference<>(
                         new TestRuleIgnoreAfterMaxFailures(maxFailures));
         ignoreAfterMaxFailures = TestRuleDelegate.of(ignoreAfterMaxFailuresDelegate);
     }
@@ -224,7 +225,7 @@ public abstract class AbstractRandomizedTest extends RandomizedTest {
      * By-name list of ignored types like loggers etc.
      */
     private final static Set<String> STATIC_LEAK_IGNORED_TYPES =
-            Collections.unmodifiableSet(new HashSet<String>(Arrays.asList(
+            Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
                     EnumSet.class.getName())));
 
     private final static Set<Class<?>> TOP_LEVEL_CLASSES =
@@ -362,4 +363,5 @@ public abstract class AbstractRandomizedTest extends RandomizedTest {
     public String getTestName() {
         return threadAndTestNameRule.testMethodName;
     }
+
 }

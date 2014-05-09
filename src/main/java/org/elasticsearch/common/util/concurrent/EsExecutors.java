@@ -19,7 +19,6 @@
 
 package org.elasticsearch.common.util.concurrent;
 
-import jsr166y.LinkedTransferQueue;
 import org.elasticsearch.common.settings.Settings;
 
 import java.util.concurrent.*;
@@ -46,7 +45,7 @@ public class EsExecutors {
     }
 
     public static EsThreadPoolExecutor newScaling(int min, int max, long keepAliveTime, TimeUnit unit, ThreadFactory threadFactory) {
-        ExecutorScalingQueue<Runnable> queue = new ExecutorScalingQueue<Runnable>();
+        ExecutorScalingQueue<Runnable> queue = new ExecutorScalingQueue<>();
         // we force the execution, since we might run into concurrency issues in offer for ScalingBlockingQueue
         EsThreadPoolExecutor executor = new EsThreadPoolExecutor(min, max, keepAliveTime, unit, queue, threadFactory, new ForceQueuePolicy());
         queue.executor = executor;
@@ -62,7 +61,7 @@ public class EsExecutors {
         if (queueCapacity < 0) {
             queue = ConcurrentCollections.newBlockingQueue();
         } else {
-            queue = new SizeBlockingQueue<Runnable>(ConcurrentCollections.<Runnable>newBlockingQueue(), queueCapacity);
+            queue = new SizeBlockingQueue<>(ConcurrentCollections.<Runnable>newBlockingQueue(), queueCapacity);
         }
         return new EsThreadPoolExecutor(size, size, 0, TimeUnit.MILLISECONDS, queue, threadFactory, new EsAbortPolicy());
     }

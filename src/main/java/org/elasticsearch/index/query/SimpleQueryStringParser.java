@@ -20,19 +20,20 @@
 package org.elasticsearch.index.query;
 
 import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.queryparser.XSimpleQueryParser;
 import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.Query;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.regex.Regex;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.util.LocaleUtils;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.index.mapper.MapperService;
 
 import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -91,6 +92,7 @@ public class SimpleQueryStringParser implements QueryParser {
         BooleanClause.Occur defaultOperator = null;
         Analyzer analyzer = null;
         int flags = -1;
+        SimpleQueryParser.Settings sqsSettings = new SimpleQueryParser.Settings();
 
         XContentParser.Token token;
         while ((token = parser.nextToken()) != XContentParser.Token.END_OBJECT) {
@@ -116,7 +118,7 @@ public class SimpleQueryStringParser implements QueryParser {
                         }
 
                         if (fieldsAndWeights == null) {
-                            fieldsAndWeights = new HashMap<String, Float>();
+                            fieldsAndWeights = new HashMap<>();
                         }
 
                         if (Regex.isSimpleMatchPattern(fField)) {
@@ -167,6 +169,14 @@ public class SimpleQueryStringParser implements QueryParser {
                             flags = SimpleQueryStringFlag.ALL.value();
                         }
                     }
+                } else if ("locale".equals(currentFieldName)) {
+                    String localeStr = parser.text();
+                    Locale locale = LocaleUtils.parse(localeStr);
+                    sqsSettings.locale(locale);
+                } else if ("lowercase_expanded_terms".equals(currentFieldName)) {
+                    sqsSettings.lowercaseExpandedTerms(parser.booleanValue());
+                } else if ("lenient".equals(currentFieldName)) {
+                    sqsSettings.lenient(parser.booleanValue());
                 } else {
                     throw new QueryParsingException(parseContext.index(), "[" + NAME + "] unsupported field [" + parser.currentName() + "]");
                 }
@@ -193,12 +203,10 @@ public class SimpleQueryStringParser implements QueryParser {
             analyzer = parseContext.mapperService().searchAnalyzer();
         }
 
-        XSimpleQueryParser sqp;
-        if (fieldsAndWeights != null) {
-            sqp = new XSimpleQueryParser(analyzer, fieldsAndWeights, flags);
-        } else {
-            sqp = new XSimpleQueryParser(analyzer, Collections.singletonMap(field, 1.0F), flags);
+        if (fieldsAndWeights == null) {
+            fieldsAndWeights = Collections.singletonMap(field, 1.0F);
         }
+        SimpleQueryParser sqp = new SimpleQueryParser(analyzer, fieldsAndWeights, flags, sqsSettings);
 
         if (defaultOperator != null) {
             sqp.setDefaultOperator(defaultOperator);

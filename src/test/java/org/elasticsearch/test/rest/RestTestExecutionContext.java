@@ -19,9 +19,9 @@
 package org.elasticsearch.test.rest;
 
 import com.google.common.collect.Maps;
-import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
+import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.test.rest.client.RestClient;
 import org.elasticsearch.test.rest.client.RestException;
 import org.elasticsearch.test.rest.client.RestResponse;
@@ -31,6 +31,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -43,17 +44,16 @@ public class RestTestExecutionContext implements Closeable {
 
     private static final ESLogger logger = Loggers.getLogger(RestTestExecutionContext.class);
 
-    private final RestClient restClient;
+    private final Stash stash = new Stash();
 
-    private final String esVersion;
+    private final RestSpec restSpec;
 
-    private final Map<String, Object> stash = Maps.newHashMap();
+    private RestClient restClient;
 
     private RestResponse response;
 
-    public RestTestExecutionContext(InetSocketAddress[] addresses, RestSpec restSpec) throws RestException, IOException {
-        this.restClient = new RestClient(addresses, restSpec);
-        this.esVersion = restClient.getEsVersion();
+    public RestTestExecutionContext(RestSpec restSpec) throws RestException, IOException {
+        this.restSpec = restSpec;
     }
 
     /**
@@ -61,18 +61,21 @@ public class RestTestExecutionContext implements Closeable {
      * Saves the obtained response in the execution context.
      * @throws RestException if the returned status code is non ok
      */
-    public RestResponse callApi(String apiName, Map<String, String> params, String body) throws IOException, RestException  {
+    public RestResponse callApi(String apiName, Map<String, String> params, List<Map<String, Object>> bodies) throws IOException, RestException  {
         //makes a copy of the parameters before modifying them for this specific request
         HashMap<String, String> requestParams = Maps.newHashMap(params);
         for (Map.Entry<String, String> entry : requestParams.entrySet()) {
-            if (isStashed(entry.getValue())) {
-                entry.setValue(unstash(entry.getValue()).toString());
+            if (stash.isStashedValue(entry.getValue())) {
+                entry.setValue(stash.unstashValue(entry.getValue()).toString());
             }
         }
+
+        String body = actualBody(bodies);
+
         try {
             response = callApiInternal(apiName, requestParams, body);
             //we always stash the last response body
-            stash("body", response.getBody());
+            stash.stashValue("body", response.getBody());
             return response;
         } catch(RestException e) {
             response = e.restResponse();
@@ -80,13 +83,24 @@ public class RestTestExecutionContext implements Closeable {
         }
     }
 
-    /**
-     * Calls an elasticsearch api internally without saving the obtained response in the context.
-     * Useful for internal calls (e.g. delete index during teardown)
-     * @throws RestException if the returned status code is non ok
-     */
-    public RestResponse callApiInternal(String apiName, String... params) throws IOException, RestException {
-        return restClient.callApi(apiName, params);
+    private String actualBody(List<Map<String, Object>> bodies) throws IOException {
+        if (bodies.isEmpty()) {
+            return "";
+        }
+
+        if (bodies.size() == 1) {
+            return bodyAsString(stash.unstashMap(bodies.get(0)));
+        }
+
+        StringBuilder bodyBuilder = new StringBuilder();
+        for (Map<String, Object> body : bodies) {
+            bodyBuilder.append(bodyAsString(stash.unstashMap(body))).append("\n");
+        }
+        return bodyBuilder.toString();
+    }
+
+    private String bodyAsString(Map<String, Object> body) throws IOException {
+        return XContentFactory.jsonBuilder().map(body).string();
     }
 
     private RestResponse callApiInternal(String apiName, Map<String, String> params, String body) throws IOException, RestException  {
@@ -101,56 +115,34 @@ public class RestTestExecutionContext implements Closeable {
     }
 
     /**
+     * Recreates the embedded REST client which will point to the given addresses
+     */
+    public void resetClient(InetSocketAddress[] addresses) throws IOException, RestException {
+        if (restClient == null) {
+            restClient = new RestClient(addresses, restSpec);
+        } else {
+            restClient.updateAddresses(addresses);
+        }
+    }
+
+    /**
      * Clears the last obtained response and the stashed fields
      */
     public void clear() {
-        logger.debug("resetting response and stash");
+        logger.debug("resetting client, response and stash");
         response = null;
         stash.clear();
     }
 
-    /**
-     * Tells whether a particular value needs to be looked up in the stash
-     * The stash contains fields eventually extracted from previous responses that can be reused
-     * as arguments for following requests (e.g. scroll_id)
-     */
-    public boolean isStashed(Object key) {
-        if (key == null) {
-            return false;
-        }
-        String stashKey = key.toString();
-        return Strings.hasLength(stashKey) && stashKey.startsWith("$");
-    }
-
-    /**
-     * Extracts a value from the current stash
-     * The stash contains fields eventually extracted from previous responses that can be reused
-     * as arguments for following requests (e.g. scroll_id)
-     */
-    public Object unstash(String value) {
-        Object stashedValue = stash.get(value.substring(1));
-        if (stashedValue == null) {
-            throw new IllegalArgumentException("stashed value not found for key [" + value + "]");
-        }
-        return stashedValue;
-    }
-
-    /**
-     * Allows to saved a specific field in the stash as key-value pair
-     */
-    public void stash(String key, Object value) {
-        logger.debug("stashing [{}]=[{}]", key, value);
-        Object old = stash.put(key, value);
-        if (old != null && old != value) {
-            logger.trace("replaced stashed value [{}] with same key [{}]", old, key);
-        }
+    public Stash stash() {
+        return stash;
     }
 
     /**
      * Returns the current es version as a string
      */
     public String esVersion() {
-        return esVersion;
+        return restClient.getEsVersion();
     }
 
     /**

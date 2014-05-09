@@ -48,7 +48,7 @@ public class MultiSearchRequest extends ActionRequest<MultiSearchRequest> {
 
     private List<SearchRequest> requests = Lists.newArrayList();
 
-    private IndicesOptions indicesOptions = IndicesOptions.strict();
+    private IndicesOptions indicesOptions = IndicesOptions.strictExpandOpen();
 
     /**
      * Add a search request to execute. Note, the order is important, the search response will be returned in the
@@ -70,7 +70,7 @@ public class MultiSearchRequest extends ActionRequest<MultiSearchRequest> {
 
     public MultiSearchRequest add(byte[] data, int from, int length, boolean contentUnsafe,
                                   @Nullable String[] indices, @Nullable String[] types, @Nullable String searchType) throws Exception {
-        return add(new BytesArray(data, from, length), contentUnsafe, indices, types, searchType, null, IndicesOptions.strict(), true);
+        return add(new BytesArray(data, from, length), contentUnsafe, indices, types, searchType, null, IndicesOptions.strictExpandOpen(), true);
     }
 
     public MultiSearchRequest add(BytesReference data, boolean contentUnsafe, @Nullable String[] indices, @Nullable String[] types, @Nullable String searchType, IndicesOptions indicesOptions) throws Exception {
@@ -108,15 +108,14 @@ public class MultiSearchRequest extends ActionRequest<MultiSearchRequest> {
             }
             searchRequest.searchType(searchType);
 
-            boolean ignoreUnavailable = IndicesOptions.strict().ignoreUnavailable();
-            boolean allowNoIndices = IndicesOptions.strict().allowNoIndices();
-            boolean expandWildcardsOpen = IndicesOptions.strict().expandWildcardsOpen();
-            boolean expandWildcardsClosed = IndicesOptions.strict().expandWildcardsClosed();
+            boolean ignoreUnavailable = IndicesOptions.strictExpandOpen().ignoreUnavailable();
+            boolean allowNoIndices = IndicesOptions.strictExpandOpen().allowNoIndices();
+            boolean expandWildcardsOpen = IndicesOptions.strictExpandOpen().expandWildcardsOpen();
+            boolean expandWildcardsClosed = IndicesOptions.strictExpandOpen().expandWildcardsClosed();
 
             // now parse the action
             if (nextMarker - from > 0) {
-                XContentParser parser = xContent.createParser(data.slice(from, nextMarker - from));
-                try {
+                try (XContentParser parser = xContent.createParser(data.slice(from, nextMarker - from))) {
                     // Move to START_OBJECT, if token is null, its an empty data
                     XContentParser.Token token = parser.nextToken();
                     if (token != null) {
@@ -180,8 +179,6 @@ public class MultiSearchRequest extends ActionRequest<MultiSearchRequest> {
                             }
                         }
                     }
-                } finally {
-                    parser.close();
                 }
             }
             searchRequest.indicesOptions(IndicesOptions.fromOptions(ignoreUnavailable, allowNoIndices, expandWildcardsOpen, expandWildcardsClosed));
@@ -205,7 +202,7 @@ public class MultiSearchRequest extends ActionRequest<MultiSearchRequest> {
     }
 
     private String[] parseArray(XContentParser parser) throws IOException {
-        final List<String> list = new ArrayList<String>();
+        final List<String> list = new ArrayList<>();
         assert parser.currentToken() == XContentParser.Token.START_ARRAY;
         while (parser.nextToken() != XContentParser.Token.END_ARRAY) {
             list.add(parser.text());

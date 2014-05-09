@@ -22,7 +22,6 @@ import org.elasticsearch.action.delete.DeleteResponse;
 import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.action.percolate.PercolateResponse;
 import org.elasticsearch.common.bytes.BytesReference;
-import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.common.util.concurrent.ConcurrentCollections;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
@@ -40,6 +39,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.elasticsearch.index.query.QueryBuilders.boolQuery;
 import static org.elasticsearch.index.query.QueryBuilders.termQuery;
 import static org.elasticsearch.percolator.PercolatorTests.convertFromTextArray;
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertNoFailures;
 import static org.hamcrest.Matchers.*;
 
@@ -51,12 +51,10 @@ public class ConcurrentPercolatorTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void testSimpleConcurrentPercolator() throws Exception {
-        client().admin().indices().prepareCreate("index").setSettings(
-                ImmutableSettings.settingsBuilder()
-                        .put("index.number_of_shards", 1)
-                        .put("index.number_of_replicas", 0)
-                        .build()
-        ).execute().actionGet();
+        // We need to index a document / define mapping, otherwise field1 doesn't get reconized as number field.
+        // If we don't do this, then 'test2' percolate query gets parsed as a TermQuery and not a RangeQuery.
+        // The percolate api doesn't parse the doc if no queries have registered, so it can't lazily create a mapping
+        assertAcked(prepareCreate("index").addMapping("type", "field1", "type=long", "field2", "type=string")); // random # shards better has a mapping!
         ensureGreen();
 
         final BytesReference onlyField1 = XContentFactory.jsonBuilder().startObject().startObject("doc")
@@ -70,10 +68,6 @@ public class ConcurrentPercolatorTests extends ElasticsearchIntegrationTest {
                 .field("field2", "value")
                 .endObject().endObject().bytes();
 
-
-        // We need to index a document / define mapping, otherwise field1 doesn't get reconized as number field.
-        // If we don't do this, then 'test2' percolate query gets parsed as a TermQuery and not a RangeQuery.
-        // The percolate api doesn't parse the doc if no queries have registered, so it can't lazily create a mapping
         client().prepareIndex("index", "type", "1").setSource(XContentFactory.jsonBuilder().startObject()
                 .field("field1", 1)
                 .field("field2", "value")
@@ -85,11 +79,12 @@ public class ConcurrentPercolatorTests extends ElasticsearchIntegrationTest {
         client().prepareIndex("index", PercolatorService.TYPE_NAME, "test2")
                 .setSource(XContentFactory.jsonBuilder().startObject().field("query", termQuery("field1", 1)).endObject())
                 .execute().actionGet();
+        refresh(); // make sure it's refreshed
 
         final CountDownLatch start = new CountDownLatch(1);
         final AtomicBoolean stop = new AtomicBoolean(false);
         final AtomicInteger counts = new AtomicInteger(0);
-        final AtomicBoolean assertionFailure = new AtomicBoolean(false);
+        final AtomicReference<Throwable> exceptionHolder = new AtomicReference<>();
         Thread[] threads = new Thread[5];
 
         for (int i = 0; i < threads.length; i++) {
@@ -124,11 +119,10 @@ public class ConcurrentPercolatorTests extends ElasticsearchIntegrationTest {
                                 assertThat(convertFromTextArray(percolate.getMatches(), "index"), arrayContaining("test2"));
                             }
                         }
-
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
-                    } catch (AssertionError e) {
-                        assertionFailure.set(true);
+                    } catch (Throwable e) {
+                        exceptionHolder.set(e);
                         Thread.currentThread().interrupt();
                     }
                 }
@@ -142,23 +136,22 @@ public class ConcurrentPercolatorTests extends ElasticsearchIntegrationTest {
             thread.join();
         }
 
-        assertThat(assertionFailure.get(), equalTo(false));
+        Throwable assertionError = exceptionHolder.get();
+        if (assertionError != null) {
+            assertionError.printStackTrace();
+        }
+        assertThat(assertionError + " should be null", assertionError, nullValue());
     }
 
     @Test
     public void testConcurrentAddingAndPercolating() throws Exception {
-        client().admin().indices().prepareCreate("index").setSettings(
-                ImmutableSettings.settingsBuilder()
-                        .put("index.number_of_shards", 2)
-                        .put("index.number_of_replicas", 1)
-                        .build()
-        ).execute().actionGet();
+        createIndex("index");
         ensureGreen();
         final int numIndexThreads = 3;
         final int numPercolateThreads = 6;
         final int numPercolatorOperationsPerThread = 1000;
 
-        final AtomicBoolean assertionFailure = new AtomicBoolean(false);
+        final Set<Throwable> exceptionsHolder = ConcurrentCollections.newConcurrentSet();
         final CountDownLatch start = new CountDownLatch(1);
         final AtomicInteger runningPercolateThreads = new AtomicInteger(numPercolateThreads);
         final AtomicInteger type1 = new AtomicInteger();
@@ -213,7 +206,7 @@ public class ConcurrentPercolatorTests extends ElasticsearchIntegrationTest {
                             assertThat(response.getVersion(), equalTo(1l));
                         }
                     } catch (Throwable t) {
-                        assertionFailure.set(true);
+                        exceptionsHolder.add(t);
                         logger.error("Error in indexing thread...", t);
                     }
                 }
@@ -272,7 +265,7 @@ public class ConcurrentPercolatorTests extends ElasticsearchIntegrationTest {
                             }
                         }
                     } catch (Throwable t) {
-                        assertionFailure.set(true);
+                        exceptionsHolder.add(t);
                         logger.error("Error in percolate thread...", t);
                     } finally {
                         runningPercolateThreads.decrementAndGet();
@@ -291,22 +284,20 @@ public class ConcurrentPercolatorTests extends ElasticsearchIntegrationTest {
             thread.join();
         }
 
-        assertThat(assertionFailure.get(), equalTo(false));
+        for (Throwable t : exceptionsHolder) {
+            logger.error("Unexpected exception {}", t.getMessage(), t);
+        }
+        assertThat(exceptionsHolder.isEmpty(), equalTo(true));
     }
 
     @Test
     public void testConcurrentAddingAndRemovingWhilePercolating() throws Exception {
-        client().admin().indices().prepareCreate("index").setSettings(
-                ImmutableSettings.settingsBuilder()
-                        .put("index.number_of_shards", 2)
-                        .put("index.number_of_replicas", 1)
-                        .build()
-        ).execute().actionGet();
+        createIndex("index");
         ensureGreen();
         final int numIndexThreads = 3;
         final int numberPercolateOperation = 100;
 
-        final AtomicReference<Throwable> exceptionHolder = new AtomicReference<Throwable>(null);
+        final AtomicReference<Throwable> exceptionHolder = new AtomicReference<>(null);
         final AtomicInteger idGen = new AtomicInteger(0);
         final Set<String> liveIds = ConcurrentCollections.newConcurrentSet();
         final AtomicBoolean run = new AtomicBoolean(true);

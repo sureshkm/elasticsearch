@@ -26,11 +26,8 @@ import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.action.search.SearchType;
 import org.elasticsearch.action.search.ShardSearchFailure;
 import org.elasticsearch.client.Client;
-import org.elasticsearch.common.Priority;
 import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.joda.Joda;
-import org.elasticsearch.common.settings.ImmutableSettings;
-import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.search.facet.datehistogram.DateHistogramFacet;
@@ -60,26 +57,20 @@ import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
 import static org.elasticsearch.index.query.FilterBuilders.termFilter;
 import static org.elasticsearch.index.query.QueryBuilders.*;
 import static org.elasticsearch.search.facet.FacetBuilders.*;
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertHitCount;
 import static org.hamcrest.Matchers.*;
 
 /**
  *
  */
-public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
 
+public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
     private int numRuns = -1;
-    @Override
-    public Settings indexSettings() {
-        return ImmutableSettings.builder()
-                .put("index.number_of_shards", between(1, 5))
-                .put("index.number_of_replicas", 0)
-                .build();
-    }
 
     protected int numberOfRuns() {
         if (numRuns == -1) {
-            numRuns = atLeast(3);
+            numRuns = scaledRandomIntBetween(3, 10);
         }
         return numRuns;
     }
@@ -96,7 +87,7 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
         SearchResponse searchResponse = client().prepareSearch()
                 .setSearchType(SearchType.COUNT)
                 .setFacets(new BytesArray(
-                        "{\"facet1\":{\"filter\":{ }}}").array())
+                        "{\"facet1\":{\"filter\":{ }}}"))
                 .get();
 
         assertHitCount(searchResponse, 1l);
@@ -118,7 +109,7 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
         SearchResponse searchResponse = client().prepareSearch()
                 .setSearchType(SearchType.COUNT)
                 .setFacets(new BytesArray(
-                        "{\"facet1\":{\"terms\":{\"field\":\"tag\"},\"facet_filter\":{ }}}").array())
+                        "{\"facet1\":{\"terms\":{\"field\":\"tag\"},\"facet_filter\":{ }}}"))
                 .get();
 
         assertHitCount(searchResponse, 1l);
@@ -133,9 +124,7 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
     @Test
     public void testBinaryFacet() throws Exception {
         createIndex("test");
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
-
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+        ensureGreen();
 
         client().prepareIndex("test", "type1").setSource(jsonBuilder().startObject()
                 .field("tag", "green")
@@ -175,16 +164,15 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void testFacetNumeric() throws ElasticsearchException, IOException {
-        prepareCreate("test").addMapping("type", jsonBuilder().startObject().startObject("type").startObject("properties")
+        assertAcked(prepareCreate("test").addMapping("type", jsonBuilder().startObject().startObject("type").startObject("properties")
                 .startObject("byte").field("type", "byte").startObject("fielddata").field("format", maybeDocValues() ? "doc_values" : null).endObject().endObject()
                 .startObject("short").field("type", "short").startObject("fielddata").field("format", maybeDocValues() ? "doc_values" : null).endObject().endObject()
                 .startObject("integer").field("type", "integer").startObject("fielddata").field("format", maybeDocValues() ? "doc_values" : null).endObject().endObject()
                 .startObject("long").field("type", "long").startObject("fielddata").field("format", maybeDocValues() ? "doc_values" : null).endObject().endObject()
                 .startObject("float").field("type", "float").startObject("fielddata").field("format", maybeDocValues() ? "doc_values" : null).endObject().endObject()
                 .startObject("double").field("type", "double").startObject("fielddata").field("format", maybeDocValues() ? "doc_values" : null).endObject().endObject()
-                .endObject().endObject().endObject())
-                .execute().actionGet();
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+                .endObject().endObject().endObject()));
+        ensureGreen();
 
         for (int i = 0; i < 100; i++) {
             client().prepareIndex("test", "type", "" + i).setSource(jsonBuilder().startObject()
@@ -204,23 +192,23 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
                     .field("foo", "" + i)
                     .endObject()).execute().actionGet();
         }
-
+        int shardSize = getNumShards("test").numPrimaries > 5 ? 20 : 10;
         String[] execHint = new String[]{"map", null};
         for (String hint : execHint) {
 
             flushAndRefresh();
             SearchResponse searchResponse = client().prepareSearch()
                     .setQuery(matchAllQuery())
-                    .addFacet(termsFacet("double").executionHint(hint).field("double").size(10))
-                    .addFacet(termsFacet("float").executionHint(hint).field("float").size(10))
-                    .addFacet(termsFacet("integer").executionHint(hint).field("integer").size(10))
-                    .addFacet(termsFacet("long").executionHint(hint).field("long").size(10))
-                    .addFacet(termsFacet("short").executionHint(hint).field("short").size(10))
-                    .addFacet(termsFacet("byte").executionHint(hint).field("byte").size(10))
-                    .addFacet(termsFacet("termFacet").executionHint(hint).field("name").size(10))
-                    .addFacet(termsFacet("termFacetRegex").executionHint(hint).field("multiValued").regex("9\\d").size(20))
-                    .addFacet(termsFacet("termFacetScript").executionHint(hint).field("multiValued").script("Integer.toHexString(Integer.parseInt(term))").size(10))
-                    .addFacet(termsFacet("termFacetScriptRegex").executionHint(hint).field("multiValued").script("Integer.toHexString(Integer.parseInt(term))").regex("9\\d").size(20))
+                    .addFacet(termsFacet("double").shardSize(shardSize).executionHint(hint).field("double").size(10))
+                    .addFacet(termsFacet("float").shardSize(shardSize).executionHint(hint).field("float").size(10))
+                    .addFacet(termsFacet("integer").shardSize(shardSize).executionHint(hint).field("integer").size(10))
+                    .addFacet(termsFacet("long").shardSize(shardSize).executionHint(hint).field("long").size(10))
+                    .addFacet(termsFacet("short").shardSize(shardSize).executionHint(hint).field("short").size(10))
+                    .addFacet(termsFacet("byte").shardSize(shardSize).executionHint(hint).field("byte").size(10))
+                    .addFacet(termsFacet("termFacet").shardSize(shardSize).executionHint(hint).field("name").size(10))
+                    .addFacet(termsFacet("termFacetRegex").shardSize(shardSize).executionHint(hint).field("multiValued").regex("9\\d").size(20))
+                    .addFacet(termsFacet("termFacetScript").shardSize(shardSize).executionHint(hint).field("multiValued").script("Integer.toHexString(Integer.parseInt(term))").size(10))
+                    .addFacet(termsFacet("termFacetScriptRegex").shardSize(shardSize).executionHint(hint).field("multiValued").script("Integer.toHexString(Integer.parseInt(term))").regex("9\\d").size(20))
 
                     .execute().actionGet();
 
@@ -306,24 +294,21 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
             assertThat(facet.getOtherCount(), equalTo(90l));
             assertThat(facet.getMissingCount(), equalTo(10l));
         }
-
     }
-
 
     @Test
     @Slow
     public void testConcurrentFacets() throws ElasticsearchException, IOException, InterruptedException, ExecutionException {
-        prepareCreate("test")
-        .addMapping("type", jsonBuilder().startObject().startObject("type").startObject("properties")
-                .startObject("byte").field("type", "byte").startObject("fielddata").field("format", maybeDocValues() ? "doc_values" : null).endObject().endObject()
-                .startObject("short").field("type", "short").startObject("fielddata").field("format", maybeDocValues() ? "doc_values" : null).endObject().endObject()
-                .startObject("integer").field("type", "integer").startObject("fielddata").field("format", maybeDocValues() ? "doc_values" : null).endObject().endObject()
-                .startObject("long").field("type", "long").startObject("fielddata").field("format", maybeDocValues() ? "doc_values" : null).endObject().endObject()
-                .startObject("float").field("type", "float").startObject("fielddata").field("format", maybeDocValues() ? "doc_values" : null).endObject().endObject()
-                .startObject("double").field("type", "double").startObject("fielddata").field("format", maybeDocValues() ? "doc_values" : null).endObject().endObject()
-                .endObject().endObject().endObject())
-        .execute().actionGet();
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+        assertAcked(prepareCreate("test")
+                .addMapping("type", jsonBuilder().startObject().startObject("type").startObject("properties")
+                        .startObject("byte").field("type", "byte").startObject("fielddata").field("format", maybeDocValues() ? "doc_values" : null).endObject().endObject()
+                        .startObject("short").field("type", "short").startObject("fielddata").field("format", maybeDocValues() ? "doc_values" : null).endObject().endObject()
+                        .startObject("integer").field("type", "integer").startObject("fielddata").field("format", maybeDocValues() ? "doc_values" : null).endObject().endObject()
+                        .startObject("long").field("type", "long").startObject("fielddata").field("format", maybeDocValues() ? "doc_values" : null).endObject().endObject()
+                        .startObject("float").field("type", "float").startObject("fielddata").field("format", maybeDocValues() ? "doc_values" : null).endObject().endObject()
+                        .startObject("double").field("type", "double").startObject("fielddata").field("format", maybeDocValues() ? "doc_values" : null).endObject().endObject()
+                        .endObject().endObject().endObject()));
+        ensureGreen();
 
         for (int i = 0; i < 100; i++) {
             client().prepareIndex("test", "type", "" + i).setSource(jsonBuilder().startObject()
@@ -343,8 +328,10 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
                     .endObject()).execute().actionGet();
         }
 
+        logger.info("done indexing. issue a refresh.");
         flushAndRefresh();
-        ConcurrentDuel<Facets> duel = new ConcurrentDuel<Facets>(5);
+        final AtomicInteger searchId = new AtomicInteger(0);
+        ConcurrentDuel<Facets> duel = new ConcurrentDuel<>(5);
         {
             final Client cl = client();
 
@@ -378,7 +365,11 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
                           @Override
                           public Facets run() {
                               final SearchRequestBuilder facetRequest;
-                              if (count.incrementAndGet() % 2 == 0) { // every second request is mapped
+                              int searchId = count.incrementAndGet();
+                              if (searchId % 100 == 0) {
+                                  logger.info("-> run {} searches", searchId);
+                              }
+                              if (searchId % 2 == 0) { // every second request is mapped
                                   facetRequest = cl.prepareSearch().setQuery(matchAllQuery())
                                           .addFacet(termsFacet("double").field("double").size(10))
                                           .addFacet(termsFacet("float").field("float").size(10))
@@ -405,6 +396,7 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
                       }, 5000
             );
         }
+        logger.info("starting second duel");
         {
             duel.duel(new ConcurrentDuel.DuelJudge<Facets>() {
 
@@ -436,7 +428,12 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
                           @Override
                           public Facets run() {
                               final SearchRequestBuilder facetRequest;
-                              switch (count.incrementAndGet() % 6) {
+                              int searchId = count.incrementAndGet();
+                              if (searchId % 100 == 0) {
+                                  logger.info("->  run {} searches", searchId);
+                              }
+
+                              switch (searchId % 6) {
                                   case 4:
                                       facetRequest = client().prepareSearch()
                                               .setQuery(matchAllQuery())
@@ -481,49 +478,48 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
     @Test
     @Slow
     public void testDuelByteFieldDataImpl() throws ElasticsearchException, IOException, InterruptedException, ExecutionException {
-        prepareCreate("test")
-        .addMapping("type", jsonBuilder().startObject().startObject("type").startObject("properties")
-                 .startObject("name_paged")
-                    .field("type", "string")
-                    .startObject("fielddata").field("format", "paged_bytes").field("loading", randomBoolean() ? "eager" : "lazy").endObject()
-                 .endObject()
-                 .startObject("name_fst")
-                    .field("type", "string")
-                    .startObject("fielddata").field("format", "fst").field("loading", randomBoolean() ? "eager" : "lazy").endObject()
-                 .endObject()
-                 .startObject("name_dv")
-                    .field("type", "string")
-                    .field("index", "no")
-                    .startObject("fielddata").field("format", "doc_values").field("loading", randomBoolean() ? "eager" : "lazy").endObject()
-                 .endObject()
-                 .startObject("name_paged_mv")
-                    .field("type", "string")
-                    .startObject("fielddata").field("format", "paged_bytes").field("loading", randomBoolean() ? "eager" : "lazy").endObject()
-                 .endObject()
-                 .startObject("name_fst_mv")
-                    .field("type", "string")
-                    .startObject("fielddata").field("format", "fst").field("loading", randomBoolean() ? "eager" : "lazy").endObject()
-                 .endObject()
-                 .startObject("name_dv_mv")
-                    .field("type", "string")
-                    .field("index", "no")
-                    .startObject("fielddata").field("format", "doc_values").field("loading", randomBoolean() ? "eager" : "lazy").endObject()
-                 .endObject()
-                 .startObject("filtered")
-                    .field("type", "string")
-                    .startObject("fielddata").field("format", "fst").field("loading", randomBoolean() ? "eager" : "lazy").startObject("filter")
-                    .startObject("regex").field("pattern", "\\d{1,2}").endObject().endObject()
-                    .endObject()
-                    // only 1 or 2 digits 
-                 .endObject()
-                  .startObject("filtered_mv")
-                    .field("type", "string")
-                    .startObject("fielddata").field("format", "fst").field("loading", randomBoolean() ? "eager" : "lazy").startObject("filter")
-                    .startObject("regex").field("pattern", "\\d{1,2}").endObject().endObject()
-                    .endObject()
-                .endObject().endObject().endObject())
-        .execute().actionGet();
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+        assertAcked(prepareCreate("test")
+                .addMapping("type", jsonBuilder().startObject().startObject("type").startObject("properties")
+                        .startObject("name_paged")
+                        .field("type", "string")
+                        .startObject("fielddata").field("format", "paged_bytes").field("loading", randomBoolean() ? "eager" : "lazy").endObject()
+                        .endObject()
+                        .startObject("name_fst")
+                        .field("type", "string")
+                        .startObject("fielddata").field("format", "fst").field("loading", randomBoolean() ? "eager" : "lazy").endObject()
+                        .endObject()
+                        .startObject("name_dv")
+                        .field("type", "string")
+                        .field("index", "no")
+                        .startObject("fielddata").field("format", "doc_values").field("loading", randomBoolean() ? "eager" : "lazy").endObject()
+                        .endObject()
+                        .startObject("name_paged_mv")
+                        .field("type", "string")
+                        .startObject("fielddata").field("format", "paged_bytes").field("loading", randomBoolean() ? "eager" : "lazy").endObject()
+                        .endObject()
+                        .startObject("name_fst_mv")
+                        .field("type", "string")
+                        .startObject("fielddata").field("format", "fst").field("loading", randomBoolean() ? "eager" : "lazy").endObject()
+                        .endObject()
+                        .startObject("name_dv_mv")
+                        .field("type", "string")
+                        .field("index", "no")
+                        .startObject("fielddata").field("format", "doc_values").field("loading", randomBoolean() ? "eager" : "lazy").endObject()
+                        .endObject()
+                        .startObject("filtered")
+                        .field("type", "string")
+                        .startObject("fielddata").field("format", "fst").field("loading", randomBoolean() ? "eager" : "lazy").startObject("filter")
+                        .startObject("regex").field("pattern", "\\d{1,2}").endObject().endObject()
+                        .endObject()
+                                // only 1 or 2 digits 
+                        .endObject()
+                        .startObject("filtered_mv")
+                        .field("type", "string")
+                        .startObject("fielddata").field("format", "fst").field("loading", randomBoolean() ? "eager" : "lazy").startObject("filter")
+                        .startObject("regex").field("pattern", "\\d{1,2}").endObject().endObject()
+                        .endObject()
+                        .endObject().endObject().endObject()));
+        ensureGreen();
 
         for (int i = 0; i < 100; i++) {
             client().prepareIndex("test", "type", "" + i).setSource(jsonBuilder().startObject()
@@ -542,8 +538,9 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
                     .endObject()).execute().actionGet();
         }
 
+        logger.info("done indexing. refreshing.");
         flushAndRefresh();
-        ConcurrentDuel<Facets> duel = new ConcurrentDuel<Facets>(5);
+        ConcurrentDuel<Facets> duel = new ConcurrentDuel<>(5);
         String[] fieldPostFix = new String[]{"", "_mv"};
         for (final String postfix : fieldPostFix) {
             duel.duel(new ConcurrentDuel.DuelJudge<Facets>() {
@@ -584,6 +581,9 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
                               final SearchRequestBuilder facetRequest;
                               int incrementAndGet = count.incrementAndGet();
                               final String field;
+                              if (incrementAndGet % 100 == 0) {
+                                  logger.info("-> run {} searches", incrementAndGet);
+                              }
                               switch (incrementAndGet % 2) {
                                   case 1:
                                       field = "filtered" + postfix;
@@ -629,7 +629,7 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
                               SearchResponse actionGet = facetRequest.execute().actionGet();
                               return actionGet.getFacets();
                           }
-                      }, 5000
+                      }, 2000
             );
         }
 
@@ -639,9 +639,7 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
     @Test
     public void testSearchFilter() throws Exception {
         createIndex("test");
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
-
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+        ensureGreen();
 
         client().prepareIndex("test", "type1").setSource(jsonBuilder().startObject()
                 .field("tag", "green")
@@ -689,9 +687,7 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
     @Test
     public void testFacetsWithSize0() throws Exception {
         createIndex("test");
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
-
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+        ensureGreen();
 
         client().prepareIndex("test", "type1").setSource(jsonBuilder().startObject()
                 .field("stag", "111")
@@ -747,7 +743,7 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
     public void testTermsIndexFacet() throws Exception {
         createIndex("test1");
         createIndex("test2");
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+        ensureGreen();
 
         client().prepareIndex("test1", "type1").setSource(jsonBuilder().startObject()
                 .field("stag", "111")
@@ -791,7 +787,7 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
     @Test
     public void testFilterFacets() throws Exception {
         createIndex("test");
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+        ensureGreen();
 
         client().prepareIndex("test", "type1").setSource(jsonBuilder().startObject()
                 .field("stag", "111")
@@ -804,7 +800,7 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
                 .startArray("tag").value("zzz").value("yyy").endArray()
                 .endObject()).execute().actionGet();
 
-        client().admin().indices().prepareRefresh().execute().actionGet();
+        refresh();
 
         for (int i = 0; i < numberOfRuns(); i++) {
             SearchResponse searchResponse = client().prepareSearch()
@@ -835,7 +831,7 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void testTermsFacetsMissing() throws Exception {
-        prepareCreate("test")
+        assertAcked(prepareCreate("test")
                 .addMapping("type1", jsonBuilder().startObject().startObject("type1").startObject("properties")
                         .startObject("bstag").field("type", "byte").endObject()
                         .startObject("shstag").field("type", "short").endObject()
@@ -843,9 +839,8 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
                         .startObject("lstag").field("type", "long").endObject()
                         .startObject("fstag").field("type", "float").endObject()
                         .startObject("dstag").field("type", "double").endObject()
-                        .endObject().endObject().endObject())
-                .execute().actionGet();
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+                        .endObject().endObject().endObject()));
+        ensureGreen();
 
         client().prepareIndex("test", "type1").setSource(jsonBuilder().startObject()
                 .field("stag", "111")
@@ -883,7 +878,7 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
     }
 
     private void testTermsFacets(String executionHint) throws Exception {
-        prepareCreate("test")
+        assertAcked(prepareCreate("test")
                 .addMapping("type1", jsonBuilder().startObject().startObject("type1").startObject("properties")
                         .startObject("bstag").field("type", "byte").endObject()
                         .startObject("shstag").field("type", "short").endObject()
@@ -891,9 +886,8 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
                         .startObject("lstag").field("type", "long").endObject()
                         .startObject("fstag").field("type", "float").endObject()
                         .startObject("dstag").field("type", "double").endObject()
-                        .endObject().endObject().endObject())
-                .execute().actionGet();
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+                        .endObject().endObject().endObject()));
+        ensureGreen();
 
         client().prepareIndex("test", "type1").setSource(jsonBuilder().startObject()
                 .field("stag", "111")
@@ -922,7 +916,7 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
                 .startArray("dtag").value(3000.1).value(2000.1).endArray()
                 .endObject()).execute().actionGet();
 
-        client().admin().indices().prepareRefresh().execute().actionGet();
+        refresh();
 
         for (int i = 0; i < numberOfRuns(); i++) {
             SearchResponse searchResponse = client().prepareSearch()
@@ -1293,9 +1287,7 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
     @Test
     public void testTermFacetWithEqualTermDistribution() throws Exception {
         createIndex("test");
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
-
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+        ensureGreen();
 
         // at the end of the index, we should have 10 of each `bar`, `foo`, and `baz`
         for (int i = 0; i < 5; i++) {
@@ -1314,7 +1306,7 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
                     .field("text", "baz foo")
                     .endObject()).execute().actionGet();
         }
-        client().admin().indices().prepareRefresh().execute().actionGet();
+        refresh();
 
         for (int i = 0; i < numberOfRuns(); i++) {
             SearchResponse searchResponse = client().prepareSearch()
@@ -1341,8 +1333,8 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
                 .startObject("num").field("type", "integer").endObject()
                 .startObject("multi_num").field("type", "float").endObject()
                 .endObject().endObject().endObject().string();
-        prepareCreate("test").addMapping("type1", mapping).execute().actionGet();
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+        assertAcked(prepareCreate("test").addMapping("type1", mapping));
+        ensureGreen();
 
         client().prepareIndex("test", "type1").setSource(jsonBuilder().startObject()
                 .field("num", 1)
@@ -1439,8 +1431,9 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
         String mapping = jsonBuilder().startObject().startObject("type1").startObject("properties")
                 .startObject("num").field("type", "integer").endObject()
                 .endObject().endObject().endObject().string();
-        prepareCreate("test").addMapping("type1", mapping).execute().actionGet();
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+        assertAcked(prepareCreate("test").addMapping("type1", mapping));
+        ensureGreen();
+
         client().prepareIndex("test", "type1").setSource(jsonBuilder().startObject()
                 .field("num", 100)
                 .endObject()).execute().actionGet();
@@ -1486,8 +1479,8 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
                 .startObject("multi_num").field("type", "float").endObject()
                 .startObject("date").field("type", "date").endObject()
                 .endObject().endObject().endObject().string();
-        prepareCreate("test").addMapping("type1", mapping).execute().actionGet();
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+        assertAcked(prepareCreate("test").addMapping("type1", mapping));
+        ensureGreen();
 
         client().prepareIndex("test", "type1").setSource(jsonBuilder().startObject()
                 .field("num", 1055)
@@ -1655,8 +1648,8 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
                 .startObject("multi_value").field("type", "float").endObject()
                 .startObject("date").field("type", "date").endObject()
                 .endObject().endObject().endObject().string();
-        prepareCreate("test").addMapping("type1", mapping).execute().actionGet();
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+        assertAcked(prepareCreate("test").addMapping("type1", mapping));
+        ensureGreen();
 
         client().prepareIndex("test", "type1").setSource(jsonBuilder().startObject()
                 .field("num", 1055)
@@ -1825,8 +1818,8 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
                 .startObject("date").field("type", "date").endObject()
                 .startObject("date_in_seconds").field("type", "long").endObject()
                 .endObject().endObject().endObject().string();
-        prepareCreate("test").addMapping("type1", mapping).execute().actionGet();
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+        assertAcked(prepareCreate("test").addMapping("type1", mapping));
+        ensureGreen();
         DateTimeFormatter parser = Joda.forPattern("dateOptionalTime").parser();
         client().prepareIndex("test", "type1").setSource(jsonBuilder().startObject()
                 .field("date", "2009-03-05T01:01:01")
@@ -1952,8 +1945,8 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
                 .startObject("num").field("type", "integer").endObject()
                 .startObject("date").field("type", "date").endObject()
                 .endObject().endObject().endObject().string();
-        prepareCreate("test").addMapping("type1", mapping).execute().actionGet();
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+        assertAcked(prepareCreate("test").addMapping("type1", mapping));
+        ensureGreen();
 
         client().prepareIndex("test", "type1").setSource(jsonBuilder().startObject()
                 .field("date", "2009-03-05T23:31:01")
@@ -2019,8 +2012,8 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
                 .startObject("num").field("type", "integer").endObject()
                 .startObject("multi_num").field("type", "float").endObject()
                 .endObject().endObject().endObject().string();
-        prepareCreate("test").addMapping("type1", mapping).execute().actionGet();
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+        assertAcked(prepareCreate("test").addMapping("type1", mapping));
+        ensureGreen();
 
         client().prepareIndex("test", "type1").setSource(jsonBuilder().startObject()
                 .field("field", "xxx")
@@ -2205,8 +2198,8 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
                 .startObject("num").field("type", "float").endObject()
                 .startObject("multi_num").field("type", "integer").endObject()
                 .endObject().endObject().endObject().string();
-        prepareCreate("test").addMapping("type1", mapping).execute().actionGet();
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+        assertAcked(prepareCreate("test").addMapping("type1", mapping));
+        ensureGreen();
 
         client().prepareIndex("test", "type1").setSource(jsonBuilder().startObject()
                 .field("lField", 100l)
@@ -2277,8 +2270,8 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
         String mapping = jsonBuilder().startObject().startObject("type1").startObject("properties")
                 .startObject("num").field("type", "float").endObject()
                 .endObject().endObject().endObject().string();
-        prepareCreate("test").addMapping("type1", mapping).execute().actionGet();
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+        assertAcked(prepareCreate("test").addMapping("type1", mapping));
+        ensureGreen();
 
         for (int i = 0; i < 20; i++) {
             client().prepareIndex("test", "type1", Integer.toString(i)).setSource("num", i % 10).execute().actionGet();
@@ -2310,7 +2303,7 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
     @Test
     public void testQueryFacet() throws Exception {
         createIndex("test");
-        client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
+        ensureGreen();
 
         for (int i = 0; i < 20; i++) {
             client().prepareIndex("test", "type1", Integer.toString(i)).setSource("num", i % 10).execute().actionGet();
@@ -2351,7 +2344,7 @@ public class SimpleFacetsTests extends ElasticsearchIntegrationTest {
                 .field("field", "xxx")
                 .endObject()).execute().actionGet();
 
-        client().admin().indices().prepareRefresh().execute().actionGet();
+        refresh();
 
         for (int i = 0; i < numberOfRuns(); i++) {
             SearchResponse searchResponse = client().prepareSearch()

@@ -65,6 +65,8 @@ public class QueryStringQueryBuilder extends BaseQueryBuilder implements Boostab
 
     private Boolean analyzeWildcard;
 
+    private Locale locale;
+
 
     private float boost = -1;
 
@@ -124,7 +126,7 @@ public class QueryStringQueryBuilder extends BaseQueryBuilder implements Boostab
         }
         fields.add(field);
         if (fieldsBoosts == null) {
-            fieldsBoosts = new ObjectFloatOpenHashMap<String>();
+            fieldsBoosts = new ObjectFloatOpenHashMap<>();
         }
         fieldsBoosts.put(field, boost);
         return this;
@@ -312,6 +314,11 @@ public class QueryStringQueryBuilder extends BaseQueryBuilder implements Boostab
         return this;
     }
 
+    public QueryStringQueryBuilder locale(Locale locale) {
+        this.locale = locale;
+        return this;
+    }
+
     @Override
     protected void doXContent(XContentBuilder builder, Params params) throws IOException {
         builder.startObject(QueryStringQueryParser.NAME);
@@ -391,6 +398,9 @@ public class QueryStringQueryBuilder extends BaseQueryBuilder implements Boostab
         }
         if (queryName != null) {
             builder.field("_name", queryName);
+        }
+        if (locale != null) {
+            builder.field("locale", locale.toString());
         }
         builder.endObject();
     }

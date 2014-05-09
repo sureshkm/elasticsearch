@@ -33,6 +33,7 @@ import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
 
+import java.io.Closeable;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -43,7 +44,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p/>
  * In order to create a new bulk processor, use the {@link Builder}.
  */
-public class BulkProcessor {
+public class BulkProcessor implements Closeable {
 
     /**
      * A listener for the execution.
@@ -191,6 +192,7 @@ public class BulkProcessor {
         }
     }
 
+    @Override
     /**
      * Closes the processor. If flushing by time is enabled, then its shutdown. Any remaining bulk actions are flushed.
      */
@@ -235,7 +237,14 @@ public class BulkProcessor {
         return this;
     }
 
+    public void ensureOpen() {
+        if (closed) {
+            throw new ElasticsearchIllegalStateException("bulk process already closed");
+        }
+    }
+
     private synchronized void internalAdd(ActionRequest request, @Nullable Object payload) {
+        ensureOpen();
         bulkRequest.add(request, payload);
         executeIfNeeded();
     }
@@ -251,9 +260,7 @@ public class BulkProcessor {
     }
 
     private void executeIfNeeded() {
-        if (closed) {
-            throw new ElasticsearchIllegalStateException("bulk process already closed");
-        }
+        ensureOpen();
         if (!isOverTheLimit()) {
             return;
         }
@@ -313,13 +320,23 @@ public class BulkProcessor {
     }
 
     private boolean isOverTheLimit() {
-        if (bulkActions != -1 && bulkRequest.numberOfActions() > bulkActions) {
+        if (bulkActions != -1 && bulkRequest.numberOfActions() >= bulkActions) {
             return true;
         }
-        if (bulkSize != -1 && bulkRequest.estimatedSizeInBytes() > bulkSize) {
+        if (bulkSize != -1 && bulkRequest.estimatedSizeInBytes() >= bulkSize) {
             return true;
         }
         return false;
+    }
+
+    /**
+     * Flush pending delete or index requests.
+     */
+    public synchronized void flush() {
+        ensureOpen();
+        if (bulkRequest.numberOfActions() > 0) {
+            execute();
+        }
     }
 
     class Flush implements Runnable {

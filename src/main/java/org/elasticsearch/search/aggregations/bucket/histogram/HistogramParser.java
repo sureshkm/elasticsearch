@@ -18,26 +18,25 @@
  */
 package org.elasticsearch.search.aggregations.bucket.histogram;
 
+import org.elasticsearch.common.ParseField;
 import org.elasticsearch.common.rounding.Rounding;
 import org.elasticsearch.common.xcontent.XContentParser;
-import org.elasticsearch.index.fielddata.IndexFieldData;
-import org.elasticsearch.index.mapper.FieldMapper;
 import org.elasticsearch.search.SearchParseException;
 import org.elasticsearch.search.aggregations.Aggregator;
 import org.elasticsearch.search.aggregations.AggregatorFactory;
-import org.elasticsearch.search.aggregations.support.FieldContext;
-import org.elasticsearch.search.aggregations.support.ValuesSourceConfig;
-import org.elasticsearch.search.aggregations.support.numeric.NumericValuesSource;
-import org.elasticsearch.search.aggregations.support.numeric.ValueFormatter;
+import org.elasticsearch.search.aggregations.support.ValueType;
+import org.elasticsearch.search.aggregations.support.ValuesSourceParser;
+import org.elasticsearch.search.aggregations.support.format.ValueParser;
 import org.elasticsearch.search.internal.SearchContext;
 
 import java.io.IOException;
-import java.util.Map;
 
 /**
  * Parses the histogram request
  */
 public class HistogramParser implements Aggregator.Parser {
+
+    static final ParseField EXTENDED_BOUNDS = new ParseField("extended_bounds");
 
     @Override
     public String type() {
@@ -47,36 +46,25 @@ public class HistogramParser implements Aggregator.Parser {
     @Override
     public AggregatorFactory parse(String aggregationName, XContentParser parser, SearchContext context) throws IOException {
 
-        ValuesSourceConfig<NumericValuesSource> config = new ValuesSourceConfig<NumericValuesSource>(NumericValuesSource.class);
+        ValuesSourceParser vsParser = ValuesSourceParser.numeric(aggregationName, InternalHistogram.TYPE, context)
+                .requiresSortedValues(true)
+                .targetValueType(ValueType.NUMERIC)
+                .formattable(true)
+                .build();
 
-        String field = null;
-        String script = null;
-        String scriptLang = null;
-        Map<String, Object> scriptParams = null;
         boolean keyed = false;
         long minDocCount = 1;
         InternalOrder order = (InternalOrder) InternalOrder.KEY_ASC;
         long interval = -1;
-        boolean assumeSorted = false;
-        String format = null;
+        ExtendedBounds extendedBounds = null;
 
         XContentParser.Token token;
         String currentFieldName = null;
         while ((token = parser.nextToken()) != XContentParser.Token.END_OBJECT) {
             if (token == XContentParser.Token.FIELD_NAME) {
                 currentFieldName = parser.currentName();
-            } else if (token == XContentParser.Token.VALUE_STRING) {
-                if ("field".equals(currentFieldName)) {
-                    field = parser.text();
-                } else if ("script".equals(currentFieldName)) {
-                    script = parser.text();
-                } else if ("lang".equals(currentFieldName)) {
-                    scriptLang = parser.text();
-                } else if ("format".equals(currentFieldName)) {
-                    format = parser.text();
-                } else {
-                    throw new SearchParseException(context, "Unknown key for a " + token + " in aggregation [" + aggregationName + "]: [" + currentFieldName + "].");
-                }
+            } else if (vsParser.token(currentFieldName, token, parser)) {
+                continue;
             } else if (token == XContentParser.Token.VALUE_NUMBER) {
                 if ("interval".equals(currentFieldName)) {
                     interval = parser.longValue();
@@ -88,15 +76,11 @@ public class HistogramParser implements Aggregator.Parser {
             } else if (token == XContentParser.Token.VALUE_BOOLEAN) {
                 if ("keyed".equals(currentFieldName)) {
                     keyed = parser.booleanValue();
-                } else if ("script_values_sorted".equals(currentFieldName) || "scriptValuesSorted".equals(currentFieldName)) {
-                    assumeSorted = parser.booleanValue();
                 } else {
                     throw new SearchParseException(context, "Unknown key for a " + token + " in aggregation [" + aggregationName + "]: [" + currentFieldName + "].");
                 }
             } else if (token == XContentParser.Token.START_OBJECT) {
-                if ("params".equals(currentFieldName)) {
-                    scriptParams = parser.map();
-                } else if ("order".equals(currentFieldName)) {
+                if ("order".equals(currentFieldName)) {
                     while ((token = parser.nextToken()) != XContentParser.Token.END_OBJECT) {
                         if (token == XContentParser.Token.FIELD_NAME) {
                             currentFieldName = parser.currentName();
@@ -109,6 +93,22 @@ public class HistogramParser implements Aggregator.Parser {
                             order = resolveOrder(currentFieldName, asc);
                         }
                     }
+                } else if (EXTENDED_BOUNDS.match(currentFieldName)) {
+                    extendedBounds = new ExtendedBounds();
+                    while ((token = parser.nextToken()) != XContentParser.Token.END_OBJECT) {
+                        if (token == XContentParser.Token.FIELD_NAME) {
+                            currentFieldName = parser.currentName();
+                        } else if (token.isValue()) {
+                            if ("min".equals(currentFieldName)) {
+                                extendedBounds.min = parser.longValue(true);
+                            } else if ("max".equals(currentFieldName)) {
+                                extendedBounds.max = parser.longValue(true);
+                            } else {
+                                throw new SearchParseException(context, "Unknown extended_bounds key for a " + token + " in aggregation [" + aggregationName + "]: [" + currentFieldName + "].");
+                            }
+                        }
+                    }
+
                 } else {
                     throw new SearchParseException(context, "Unknown key for a " + token + " in aggregation [" + aggregationName + "]: [" + currentFieldName + "].");
                 }
@@ -122,33 +122,12 @@ public class HistogramParser implements Aggregator.Parser {
         }
         Rounding rounding = new Rounding.Interval(interval);
 
-        if (script != null) {
-            config.script(context.scriptService().search(context.lookup(), scriptLang, script, scriptParams));
+        if (extendedBounds != null) {
+            // with numeric histogram, we can process here and fail fast if the bounds are invalid
+            extendedBounds.processAndValidate(aggregationName, context, ValueParser.RAW);
         }
 
-        if (!assumeSorted) {
-            // we need values to be sorted and unique for efficiency
-            config.ensureSorted(true);
-        }
-
-        if (field == null) {
-            return new HistogramAggregator.Factory(aggregationName, config, rounding, order, keyed, minDocCount, InternalHistogram.FACTORY);
-        }
-
-        FieldMapper<?> mapper = context.smartNameFieldMapper(field);
-        if (mapper == null) {
-            config.unmapped(true);
-            return new HistogramAggregator.Factory(aggregationName, config, rounding, order, keyed, minDocCount, InternalHistogram.FACTORY);
-        }
-
-        IndexFieldData<?> indexFieldData = context.fieldData().getForField(mapper);
-        config.fieldContext(new FieldContext(field, indexFieldData));
-
-        if (format != null) {
-            config.formatter(new ValueFormatter.Number.Pattern(format));
-        }
-
-        return new HistogramAggregator.Factory(aggregationName, config, rounding, order, keyed, minDocCount, InternalHistogram.FACTORY);
+        return new HistogramAggregator.Factory(aggregationName, vsParser.config(), rounding, order, keyed, minDocCount, extendedBounds, InternalHistogram.FACTORY);
 
     }
 
@@ -159,10 +138,6 @@ public class HistogramParser implements Aggregator.Parser {
         if ("_count".equals(key)) {
             return (InternalOrder) (asc ? InternalOrder.COUNT_ASC : InternalOrder.COUNT_DESC);
         }
-        int i = key.indexOf('.');
-        if (i < 0) {
-            return new InternalOrder.Aggregation(key, null, asc);
-        }
-        return new InternalOrder.Aggregation(key.substring(0, i), key.substring(i + 1), asc);
+        return new InternalOrder.Aggregation(key, asc);
     }
 }

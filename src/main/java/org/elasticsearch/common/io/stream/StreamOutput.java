@@ -40,14 +40,14 @@ import java.util.Map;
  */
 public abstract class StreamOutput extends OutputStream {
 
-    private static ThreadLocal<SoftReference<UTF8StreamWriter>> utf8StreamWriter = new ThreadLocal<SoftReference<UTF8StreamWriter>>();
+    private static ThreadLocal<SoftReference<UTF8StreamWriter>> utf8StreamWriter = new ThreadLocal<>();
 
     public static UTF8StreamWriter utf8StreamWriter() {
         SoftReference<UTF8StreamWriter> ref = utf8StreamWriter.get();
         UTF8StreamWriter writer = (ref == null) ? null : ref.get();
         if (writer == null) {
             writer = new UTF8StreamWriter(1024 * 4);
-            utf8StreamWriter.set(new SoftReference<UTF8StreamWriter>(writer));
+            utf8StreamWriter.set(new SoftReference<>(writer));
         }
         writer.reset();
         return writer;
@@ -410,43 +410,43 @@ public abstract class StreamOutput extends OutputStream {
             writeShort((Short) value);
         } else if (type == int[].class) {
             writeByte((byte) 17);
-            writePrimitiveIntArray((int[]) value);
+            writeIntArray((int[]) value);
         } else if (type == long[].class) {
             writeByte((byte) 18);
-            writePrimitiveLongArray((long[]) value);
+            writeLongArray((long[]) value);
         } else if (type == float[].class) {
             writeByte((byte) 19);
-            writePrimitiveFloatArray((float[]) value);
+            writeFloatArray((float[]) value);
         } else if (type == double[].class) {
             writeByte((byte) 20);
-            writePrimitiveDoubleArray((double[]) value);
+            writeDoubleArray((double[]) value);
         } else {
             throw new IOException("Can't write type [" + type + "]");
         }
     }
 
-    private void writePrimitiveIntArray(int[] value) throws IOException {
+    public void writeIntArray(int[] value) throws IOException {
         writeVInt(value.length);
         for (int i=0; i<value.length; i++) {
             writeInt(value[i]);
         }
     }
     
-    private void writePrimitiveLongArray(long[] value) throws IOException {
+    public void writeLongArray(long[] value) throws IOException {
         writeVInt(value.length);
         for (int i=0; i<value.length; i++) {
             writeLong(value[i]);
         }
     }
     
-    private void writePrimitiveFloatArray(float[] value) throws IOException {
+    public void writeFloatArray(float[] value) throws IOException {
         writeVInt(value.length);
         for (int i=0; i<value.length; i++) {
             writeFloat(value[i]);
         }
     }
     
-    private void writePrimitiveDoubleArray(double[] value) throws IOException {
+    public void writeDoubleArray(double[] value) throws IOException {
         writeVInt(value.length);
         for (int i=0; i<value.length; i++) {
             writeDouble(value[i]);

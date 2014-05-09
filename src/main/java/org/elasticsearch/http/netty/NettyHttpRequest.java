@@ -45,7 +45,7 @@ public class NettyHttpRequest extends HttpRequest {
     public NettyHttpRequest(org.jboss.netty.handler.codec.http.HttpRequest request, Channel channel) {
         this.request = request;
         this.channel = channel;
-        this.params = new HashMap<String, String>();
+        this.params = new HashMap<>();
         if (request.getContent().readable()) {
             this.content = new ChannelBufferBytesReference(request.getContent());
         } else {
@@ -60,6 +60,10 @@ public class NettyHttpRequest extends HttpRequest {
             this.rawPath = uri.substring(0, pathEndPos);
             RestUtils.decodeQueryString(uri, pathEndPos + 1, params);
         }
+    }
+
+    public org.jboss.netty.handler.codec.http.HttpRequest request() {
+        return this.request;
     }
 
     @Override

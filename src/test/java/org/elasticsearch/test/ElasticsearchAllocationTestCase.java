@@ -46,7 +46,7 @@ import static org.hamcrest.CoreMatchers.is;
 
 /**
  */
-public class ElasticsearchAllocationTestCase extends ElasticsearchTestCase {
+public abstract class ElasticsearchAllocationTestCase extends ElasticsearchTestCase {
 
     public static AllocationService createAllocationService() {
         return createAllocationService(ImmutableSettings.Builder.EMPTY_SETTINGS);
@@ -64,7 +64,7 @@ public class ElasticsearchAllocationTestCase extends ElasticsearchTestCase {
 
     public static AllocationDeciders randomAllocationDeciders(Settings settings, NodeSettingsService nodeSettingsService, Random random) {
         final ImmutableSet<Class<? extends AllocationDecider>> defaultAllocationDeciders = AllocationDecidersModule.DEFAULT_ALLOCATION_DECIDERS;
-        final List<AllocationDecider> list = new ArrayList<AllocationDecider>();
+        final List<AllocationDecider> list = new ArrayList<>();
         for (Class<? extends AllocationDecider> deciderClass : defaultAllocationDeciders) {
             try {
                 try {

@@ -19,12 +19,14 @@
 
 package org.elasticsearch.index.translog.fs;
 
+import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.index.translog.Translog;
 import org.elasticsearch.index.translog.TranslogException;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -33,6 +35,7 @@ public class SimpleFsTranslogFile implements FsTranslogFile {
     private final long id;
     private final ShardId shardId;
     private final RafReference raf;
+    private final AtomicBoolean closed = new AtomicBoolean();
 
     private final AtomicInteger operationCounter = new AtomicInteger();
 
@@ -60,12 +63,12 @@ public class SimpleFsTranslogFile implements FsTranslogFile {
         return lastWrittenPosition.get();
     }
 
-    public Translog.Location add(byte[] data, int from, int size) throws IOException {
-        long position = lastPosition.getAndAdd(size);
-        raf.channel().write(ByteBuffer.wrap(data, from, size), position);
-        lastWrittenPosition.getAndAdd(size);
+    public Translog.Location add(BytesReference data) throws IOException {
+        long position = lastPosition.getAndAdd(data.length());
+        data.writeTo(raf.channel());
+        lastWrittenPosition.getAndAdd(data.length());
         operationCounter.incrementAndGet();
-        return new Translog.Location(id, position, size);
+        return new Translog.Location(id, position, data.length());
     }
 
     public byte[] read(Translog.Location location) throws IOException {
@@ -75,8 +78,20 @@ public class SimpleFsTranslogFile implements FsTranslogFile {
     }
 
     public void close(boolean delete) {
-        sync();
-        raf.decreaseRefCount(delete);
+        if (!closed.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            if (!delete) {
+                try {
+                    sync();
+                } catch (Exception e) {
+                    throw new TranslogException(shardId, "failed to sync on close", e);
+                }
+            }
+        } finally {
+            raf.decreaseRefCount(delete);
+        }
     }
 
     /**
@@ -98,18 +113,14 @@ public class SimpleFsTranslogFile implements FsTranslogFile {
         return lastWrittenPosition.get() != lastSyncPosition;
     }
 
-    public void sync() {
-        try {
-            // check if we really need to sync here...
-            long last = lastWrittenPosition.get();
-            if (last == lastSyncPosition) {
-                return;
-            }
-            lastSyncPosition = last;
-            raf.channel().force(false);
-        } catch (Exception e) {
-            // ignore
+    public void sync() throws IOException {
+        // check if we really need to sync here...
+        long last = lastWrittenPosition.get();
+        if (last == lastSyncPosition) {
+            return;
         }
+        lastSyncPosition = last;
+        raf.channel().force(false);
     }
 
     @Override

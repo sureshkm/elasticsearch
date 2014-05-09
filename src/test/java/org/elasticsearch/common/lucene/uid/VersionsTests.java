@@ -34,7 +34,7 @@ import org.elasticsearch.common.Numbers;
 import org.elasticsearch.common.lucene.Lucene;
 import org.elasticsearch.index.mapper.internal.UidFieldMapper;
 import org.elasticsearch.index.mapper.internal.VersionFieldMapper;
-import org.elasticsearch.index.merge.policy.IndexUpgraderMergePolicy;
+import org.elasticsearch.index.merge.policy.ElasticsearchMergePolicy;
 import org.elasticsearch.test.ElasticsearchLuceneTestCase;
 import org.hamcrest.MatcherAssert;
 import org.junit.Test;
@@ -118,7 +118,7 @@ public class VersionsTests extends ElasticsearchLuceneTestCase {
         Directory dir = newDirectory();
         IndexWriter writer = new IndexWriter(dir, new IndexWriterConfig(Lucene.VERSION, Lucene.STANDARD_ANALYZER));
 
-        List<Document> docs = new ArrayList<Document>();
+        List<Document> docs = new ArrayList<>();
         for (int i = 0; i < 4; ++i) {
             // Nested
             Document doc = new Document();
@@ -225,7 +225,7 @@ public class VersionsTests extends ElasticsearchLuceneTestCase {
     @Test
     public void testMergingOldIndices() throws Exception {
         final IndexWriterConfig iwConf = new IndexWriterConfig(Lucene.VERSION, new KeywordAnalyzer());
-        iwConf.setMergePolicy(new IndexUpgraderMergePolicy(iwConf.getMergePolicy()));
+        iwConf.setMergePolicy(new ElasticsearchMergePolicy(iwConf.getMergePolicy()));
         final Directory dir = newDirectory();
         final IndexWriter iw = new IndexWriter(dir, iwConf);
 
@@ -266,7 +266,7 @@ public class VersionsTests extends ElasticsearchLuceneTestCase {
                 .put("1", 0L).put("2", 0L).put("3", 0L).put("4", 4L).put("5", 5L).put("6", 6L).build();
 
         // Force merge and check versions
-        iw.forceMerge(1);
+        iw.forceMerge(1, true);
         final AtomicReader ir = SlowCompositeReaderWrapper.wrap(DirectoryReader.open(iw.getDirectory()));
         final NumericDocValues versions = ir.getNumericDocValues(VersionFieldMapper.NAME);
         assertThat(versions, notNullValue());

@@ -27,6 +27,8 @@ import org.apache.lucene.util.PriorityQueue;
 import org.apache.lucene.util.UnicodeUtil;
 import org.elasticsearch.cache.recycler.CacheRecycler;
 import org.elasticsearch.common.collect.BoundedTreeSet;
+import org.elasticsearch.common.lease.Releasable;
+import org.elasticsearch.common.lease.Releasables;
 import org.elasticsearch.common.util.BigArrays;
 import org.elasticsearch.common.util.IntArray;
 import org.elasticsearch.index.fielddata.BytesValues;
@@ -53,6 +55,7 @@ public class TermsStringOrdinalsFacetExecutor extends FacetExecutor {
     private final IndexFieldData.WithOrdinals indexFieldData;
 
     final CacheRecycler cacheRecycler;
+    final BigArrays bigArrays;
     private final TermsFacet.ComparatorType comparatorType;
     private final int size;
     private final int shardSize;
@@ -88,8 +91,9 @@ public class TermsStringOrdinalsFacetExecutor extends FacetExecutor {
         }
 
         this.cacheRecycler = context.cacheRecycler();
+        this.bigArrays = context.bigArrays();
 
-        this.aggregators = new ArrayList<ReaderAggregator>(context.searcher().getIndexReader().leaves().size());
+        this.aggregators = new ArrayList<>(context.searcher().getIndexReader().leaves().size());
     }
 
     @Override
@@ -147,10 +151,12 @@ public class TermsStringOrdinalsFacetExecutor extends FacetExecutor {
                 list[i] = (InternalStringTermsFacet.TermEntry) ordered.pop();
             }
 
+            Releasables.close(aggregators);
+
             return new InternalStringTermsFacet(facetName, comparatorType, size, Arrays.asList(list), missing, total);
         }
 
-        BoundedTreeSet<InternalStringTermsFacet.TermEntry> ordered = new BoundedTreeSet<InternalStringTermsFacet.TermEntry>(comparatorType.comparator(), shardSize);
+        BoundedTreeSet<InternalStringTermsFacet.TermEntry> ordered = new BoundedTreeSet<>(comparatorType.comparator(), shardSize);
 
         while (queue.size() > 0) {
             ReaderAggregator agg = queue.top();
@@ -183,6 +189,8 @@ public class TermsStringOrdinalsFacetExecutor extends FacetExecutor {
             }
         }
 
+        Releasables.close(aggregators);
+
         return new InternalStringTermsFacet(facetName, comparatorType, size, ordered, missing, total);
     }
 
@@ -197,10 +205,12 @@ public class TermsStringOrdinalsFacetExecutor extends FacetExecutor {
         @Override
         public void setNextReader(AtomicReaderContext context) throws IOException {
             if (current != null) {
-                missing += current.counts.get(0);
-                total += current.total - current.counts.get(0);
-                if (current.values.ordinals().getNumOrds() > 0) {
+                missing += current.missing;
+                total += current.total;
+                if (current.values.ordinals().getMaxOrd() > Ordinals.MIN_ORDINAL) {
                     aggregators.add(current);
+                } else {
+                    Releasables.close(current);
                 }
             }
             values = indexFieldData.load(context).getBytesValues(false);
@@ -222,11 +232,13 @@ public class TermsStringOrdinalsFacetExecutor extends FacetExecutor {
         @Override
         public void postCollection() {
             if (current != null) {
-                missing += current.counts.get(0);
-                total += current.total - current.counts.get(0);
+                missing += current.missing;
+                total += current.total;
                 // if we have values for this one, add it
-                if (current.values.ordinals().getNumOrds() > 0) {
+                if (current.values.ordinals().getMaxOrd() > Ordinals.MIN_ORDINAL) {
                     aggregators.add(current);
+                } else {
+                    Releasables.close(current);
                 }
                 current = null;
             }
@@ -235,13 +247,14 @@ public class TermsStringOrdinalsFacetExecutor extends FacetExecutor {
         }
     }
 
-    public static final class ReaderAggregator {
+    public final class ReaderAggregator implements Releasable {
 
         private final long maxOrd;
 
         final BytesValues.WithOrdinals values;
         final IntArray counts;
-        long position = 0;
+        int missing = 0;
+        long position = Ordinals.MIN_ORDINAL - 1;
         BytesRef current;
         int total;
 
@@ -249,7 +262,7 @@ public class TermsStringOrdinalsFacetExecutor extends FacetExecutor {
         public ReaderAggregator(BytesValues.WithOrdinals values, int ordinalsCacheLimit, CacheRecycler cacheRecycler) {
             this.values = values;
             this.maxOrd = values.ordinals().getMaxOrd();
-            this.counts = BigArrays.newIntArray(maxOrd);
+            this.counts = bigArrays.newIntArray(maxOrd);
         }
 
         final void onOrdinal(int docId, long ordinal) {
@@ -258,8 +271,7 @@ public class TermsStringOrdinalsFacetExecutor extends FacetExecutor {
         }
 
         final void incrementMissing(int numMissing) {
-            counts.increment(0, numMissing);
-            total += numMissing;
+            missing += numMissing;
         }
 
         public boolean nextPosition() {
@@ -273,6 +285,12 @@ public class TermsStringOrdinalsFacetExecutor extends FacetExecutor {
         public BytesRef copyCurrent() {
             return values.copyShared();
         }
+
+        @Override
+        public void close() {
+            Releasables.close(counts);
+        }
+
     }
 
     public static class AggregatorPriorityQueue extends PriorityQueue<ReaderAggregator> {

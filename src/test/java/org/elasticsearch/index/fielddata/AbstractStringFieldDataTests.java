@@ -19,14 +19,15 @@
 
 package org.elasticsearch.index.fielddata;
 
-import com.carrotsearch.randomizedtesting.annotations.Repeat;
 import com.carrotsearch.randomizedtesting.generators.RandomPicks;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.Field.Store;
 import org.apache.lucene.document.StringField;
+import org.apache.lucene.index.AtomicReaderContext;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.Term;
+import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.queries.TermFilter;
 import org.apache.lucene.search.*;
 import org.apache.lucene.search.join.FixedBitSetCachingWrapperFilter;
@@ -34,18 +35,24 @@ import org.apache.lucene.search.join.ScoreMode;
 import org.apache.lucene.search.join.ToParentBlockJoinQuery;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.OpenBitSet;
+import org.apache.lucene.util.TestUtil;
 import org.apache.lucene.util.UnicodeUtil;
-import org.apache.lucene.util._TestUtil;
 import org.elasticsearch.common.lucene.search.NotFilter;
 import org.elasticsearch.common.lucene.search.XFilteredQuery;
+import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.index.fielddata.IndexFieldData.XFieldComparatorSource;
 import org.elasticsearch.index.fielddata.fieldcomparator.BytesRefFieldComparatorSource;
-import org.elasticsearch.index.fielddata.fieldcomparator.SortMode;
+import org.elasticsearch.search.MultiValueMode;
+import org.elasticsearch.index.fielddata.ordinals.GlobalOrdinalsIndexFieldData;
+import org.elasticsearch.index.fielddata.ordinals.Ordinals;
 import org.elasticsearch.index.search.nested.NestedFieldComparatorSource;
+import org.junit.Test;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+
+import static org.hamcrest.Matchers.*;
 
 /**
  */
@@ -203,12 +210,10 @@ public abstract class AbstractStringFieldDataTests extends AbstractFieldDataImpl
         writer.addDocument(d);
     }
 
-    @Repeat(iterations=10)
     public void testActualMissingValue() throws IOException {
         testActualMissingValue(false);
     }
 
-    @Repeat(iterations=10)
     public void testActualMissingValueReverse() throws IOException {
         testActualMissingValue(true);
     }
@@ -220,9 +225,9 @@ public abstract class AbstractStringFieldDataTests extends AbstractFieldDataImpl
         d.add(s);
         final String[] values = new String[randomIntBetween(2, 30)];
         for (int i = 1; i < values.length; ++i) {
-            values[i] = _TestUtil.randomUnicodeString(getRandom());
+            values[i] = TestUtil.randomUnicodeString(getRandom());
         }
-        final int numDocs = atLeast(100);
+        final int numDocs = scaledRandomIntBetween(10, 10000);
         for (int i = 0; i < numDocs; ++i) {
             final String value = RandomPicks.randomFrom(getRandom(), values);
             if (value == null) {
@@ -239,7 +244,7 @@ public abstract class AbstractStringFieldDataTests extends AbstractFieldDataImpl
         final IndexFieldData indexFieldData = getForField("value");
         final String missingValue = values[1];
         IndexSearcher searcher = new IndexSearcher(DirectoryReader.open(writer, true));
-        XFieldComparatorSource comparator = indexFieldData.comparatorSource(missingValue, SortMode.MIN);
+        XFieldComparatorSource comparator = indexFieldData.comparatorSource(missingValue, MultiValueMode.MIN);
         TopFieldDocs topDocs = searcher.search(new MatchAllDocsQuery(), randomBoolean() ? numDocs : randomIntBetween(10, numDocs), new Sort(new SortField("value", comparator, reverse)));
         assertEquals(numDocs, topDocs.totalHits);
         BytesRef previousValue = reverse ? UnicodeUtil.BIG_TERM : new BytesRef();
@@ -256,22 +261,18 @@ public abstract class AbstractStringFieldDataTests extends AbstractFieldDataImpl
         searcher.getIndexReader().close();
     }
 
-    @Repeat(iterations=3)
     public void testSortMissingFirst() throws IOException {
         testSortMissing(true, false);
     }
 
-    @Repeat(iterations=3)
     public void testSortMissingFirstReverse() throws IOException {
         testSortMissing(true, true);
     }
 
-    @Repeat(iterations=3)
     public void testSortMissingLast() throws IOException {
         testSortMissing(false, false);
     }
 
-    @Repeat(iterations=3)
     public void testSortMissingLastReverse() throws IOException {
         testSortMissing(false, true);
     }
@@ -282,9 +283,9 @@ public abstract class AbstractStringFieldDataTests extends AbstractFieldDataImpl
         d.add(s);
         final String[] values = new String[randomIntBetween(2, 10)];
         for (int i = 1; i < values.length; ++i) {
-            values[i] = _TestUtil.randomUnicodeString(getRandom());
+            values[i] = TestUtil.randomUnicodeString(getRandom());
         }
-        final int numDocs = atLeast(100);
+        final int numDocs = scaledRandomIntBetween(10, 10000);
         for (int i = 0; i < numDocs; ++i) {
             final String value = RandomPicks.randomFrom(getRandom(), values);
             if (value == null) {
@@ -299,7 +300,7 @@ public abstract class AbstractStringFieldDataTests extends AbstractFieldDataImpl
         }
         final IndexFieldData indexFieldData = getForField("value");
         IndexSearcher searcher = new IndexSearcher(DirectoryReader.open(writer, true));
-        XFieldComparatorSource comparator = indexFieldData.comparatorSource(first ? "_first" : "_last", SortMode.MIN);
+        XFieldComparatorSource comparator = indexFieldData.comparatorSource(first ? "_first" : "_last", MultiValueMode.MIN);
         TopFieldDocs topDocs = searcher.search(new MatchAllDocsQuery(), randomBoolean() ? numDocs : randomIntBetween(10, numDocs), new Sort(new SortField("value", comparator, reverse)));
         assertEquals(numDocs, topDocs.totalHits);
         BytesRef previousValue = first ? null : reverse ? UnicodeUtil.BIG_TERM : new BytesRef();
@@ -323,23 +324,21 @@ public abstract class AbstractStringFieldDataTests extends AbstractFieldDataImpl
         searcher.getIndexReader().close();
     }
 
-    @Repeat(iterations=3)
     public void testNestedSortingMin() throws IOException {
-        testNestedSorting(SortMode.MIN);
+        testNestedSorting(MultiValueMode.MIN);
     }
 
-    @Repeat(iterations=3)
     public void testNestedSortingMax() throws IOException {
-        testNestedSorting(SortMode.MAX);
+        testNestedSorting(MultiValueMode.MAX);
     }
 
-    public void testNestedSorting(SortMode sortMode) throws IOException {
+    public void testNestedSorting(MultiValueMode sortMode) throws IOException {
         final String[] values = new String[randomIntBetween(2, 20)];
         for (int i = 0; i < values.length; ++i) {
-            values[i] = _TestUtil.randomSimpleString(getRandom());
+            values[i] = TestUtil.randomSimpleString(getRandom());
         }
-        final int numParents = atLeast(100);
-        List<Document> docs = new ArrayList<Document>();
+        final int numParents = scaledRandomIntBetween(10, 10000);
+        List<Document> docs = new ArrayList<>();
         final OpenBitSet parents = new OpenBitSet();
         for (int i = 0; i < numParents; ++i) {
             docs.clear();
@@ -380,7 +379,7 @@ public abstract class AbstractStringFieldDataTests extends AbstractFieldDataImpl
             missingValue = new BytesRef(RandomPicks.randomFrom(getRandom(), values));
             break;
         default:
-            missingValue = new BytesRef(_TestUtil.randomSimpleString(getRandom()));
+            missingValue = new BytesRef(TestUtil.randomSimpleString(getRandom()));
             break;
         }
         BytesRefFieldComparatorSource innerSource = new BytesRefFieldComparatorSource(fieldData, missingValue, sortMode);
@@ -405,9 +404,9 @@ public abstract class AbstractStringFieldDataTests extends AbstractFieldDataImpl
                     final BytesRef bytesValue = new BytesRef(value);
                     if (cmpValue == null) {
                         cmpValue = bytesValue;
-                    } else if (sortMode == SortMode.MIN && bytesValue.compareTo(cmpValue) < 0) {
+                    } else if (sortMode == MultiValueMode.MIN && bytesValue.compareTo(cmpValue) < 0) {
                         cmpValue = bytesValue;
-                    } else if (sortMode == SortMode.MAX && bytesValue.compareTo(cmpValue) > 0) {
+                    } else if (sortMode == MultiValueMode.MAX && bytesValue.compareTo(cmpValue) > 0) {
                         cmpValue = bytesValue;
                     }
                 }
@@ -422,5 +421,150 @@ public abstract class AbstractStringFieldDataTests extends AbstractFieldDataImpl
             previous = cmpValue;
         }
         searcher.getIndexReader().close();
+    }
+
+    @Test
+    public void testGlobalOrdinals() throws Exception {
+        fillExtendedMvSet();
+        refreshReader();
+        FieldDataType fieldDataType = new FieldDataType("string", ImmutableSettings.builder().put("global_ordinals", "fixed"));
+        IndexFieldData.WithOrdinals ifd = getForField(fieldDataType, "value");
+        IndexFieldData.WithOrdinals globalOrdinals = ifd.loadGlobal(topLevelReader);
+        assertThat(topLevelReader.leaves().size(), equalTo(3));
+
+        // First segment
+        assertThat(globalOrdinals, instanceOf(GlobalOrdinalsIndexFieldData.class));
+        AtomicFieldData.WithOrdinals afd = globalOrdinals.load(topLevelReader.leaves().get(0));
+        BytesValues.WithOrdinals values = afd.getBytesValues(randomBoolean());
+        Ordinals.Docs ordinals = afd.getBytesValues(randomBoolean()).ordinals();
+        assertThat(ordinals.setDocument(0), equalTo(2));
+        long ord = ordinals.nextOrd();
+        assertThat(ord, equalTo(3l));
+        assertThat(values.getValueByOrd(ord).utf8ToString(), equalTo("02"));
+        ord = ordinals.nextOrd();
+        assertThat(ord, equalTo(5l));
+        assertThat(values.getValueByOrd(ord).utf8ToString(), equalTo("04"));
+        assertThat(ordinals.setDocument(1), equalTo(0));
+        assertThat(ordinals.setDocument(2), equalTo(1));
+        ord = ordinals.nextOrd();
+        assertThat(ord, equalTo(4l));
+        assertThat(values.getValueByOrd(ord).utf8ToString(), equalTo("03"));
+
+        // Second segment
+        afd = globalOrdinals.load(topLevelReader.leaves().get(1));
+        values = afd.getBytesValues(randomBoolean());
+        ordinals = afd.getBytesValues(randomBoolean()).ordinals();
+        assertThat(ordinals.setDocument(0), equalTo(3));
+        ord = ordinals.nextOrd();
+        assertThat(ord, equalTo(5l));
+        assertThat(values.getValueByOrd(ord).utf8ToString(), equalTo("04"));
+        ord = ordinals.nextOrd();
+        assertThat(ord, equalTo(6l));
+        assertThat(values.getValueByOrd(ord).utf8ToString(), equalTo("05"));
+        ord = ordinals.nextOrd();
+        assertThat(ord, equalTo(7l));
+        assertThat(values.getValueByOrd(ord).utf8ToString(), equalTo("06"));
+        assertThat(ordinals.setDocument(1), equalTo(3));
+        ord = ordinals.nextOrd();
+        assertThat(ord, equalTo(7l));
+        assertThat(values.getValueByOrd(ord).utf8ToString(), equalTo("06"));
+        ord = ordinals.nextOrd();
+        assertThat(ord, equalTo(8l));
+        assertThat(values.getValueByOrd(ord).utf8ToString(), equalTo("07"));
+        ord = ordinals.nextOrd();
+        assertThat(ord, equalTo(9l));
+        assertThat(values.getValueByOrd(ord).utf8ToString(), equalTo("08"));
+        assertThat(ordinals.setDocument(2), equalTo(0));
+        assertThat(ordinals.setDocument(3), equalTo(3));
+        ord = ordinals.nextOrd();
+        assertThat(ord, equalTo(9l));
+        assertThat(values.getValueByOrd(ord).utf8ToString(), equalTo("08"));
+        ord = ordinals.nextOrd();
+        assertThat(ord, equalTo(10l));
+        assertThat(values.getValueByOrd(ord).utf8ToString(), equalTo("09"));
+        ord = ordinals.nextOrd();
+        assertThat(ord, equalTo(11l));
+        assertThat(values.getValueByOrd(ord).utf8ToString(), equalTo("10"));
+
+        // Third segment
+        afd = globalOrdinals.load(topLevelReader.leaves().get(2));
+        values = afd.getBytesValues(randomBoolean());
+        ordinals = afd.getBytesValues(randomBoolean()).ordinals();
+        assertThat(ordinals.setDocument(0), equalTo(3));
+        ord = ordinals.nextOrd();
+        assertThat(ord, equalTo(0l));
+        assertThat(values.getValueByOrd(ord).utf8ToString(), equalTo("!08"));
+        ord = ordinals.nextOrd();
+        assertThat(ord, equalTo(1l));
+        assertThat(values.getValueByOrd(ord).utf8ToString(), equalTo("!09"));
+        ord = ordinals.nextOrd();
+        assertThat(ord, equalTo(2l));
+        assertThat(values.getValueByOrd(ord).utf8ToString(), equalTo("!10"));
+    }
+
+    @Test
+    public void testTermsEnum() throws Exception {
+        fillExtendedMvSet();
+        AtomicReaderContext atomicReaderContext = refreshReader();
+
+        IndexFieldData.WithOrdinals ifd = getForField("value");
+        AtomicFieldData.WithOrdinals afd = ifd.load(atomicReaderContext);
+
+        TermsEnum termsEnum = afd.getTermsEnum();
+        int size = 0;
+        while (termsEnum.next() != null) {
+            size++;
+        }
+        assertThat(size, equalTo(12));
+
+        assertThat(termsEnum.seekExact(new BytesRef("10")), is(true));
+        assertThat(termsEnum.term().utf8ToString(), equalTo("10"));
+        assertThat(termsEnum.next(), nullValue());
+
+        assertThat(termsEnum.seekExact(new BytesRef("08")), is(true));
+        assertThat(termsEnum.term().utf8ToString(), equalTo("08"));
+        size = 0;
+        while (termsEnum.next() != null) {
+            size++;
+        }
+        assertThat(size, equalTo(2));
+
+        termsEnum.seekExact(8);
+        assertThat(termsEnum.term().utf8ToString(), equalTo("07"));
+        size = 0;
+        while (termsEnum.next() != null) {
+            size++;
+        }
+        assertThat(size, equalTo(3));
+    }
+
+    @Test
+    public void testGlobalOrdinalsGetRemovedOnceIndexReaderCloses() throws Exception {
+        fillExtendedMvSet();
+        refreshReader();
+        FieldDataType fieldDataType = new FieldDataType("string", ImmutableSettings.builder().put("global_ordinals", "fixed"));
+        IndexFieldData.WithOrdinals ifd = getForField(fieldDataType, "value");
+        IndexFieldData.WithOrdinals globalOrdinals = ifd.loadGlobal(topLevelReader);
+        assertThat(ifd.loadGlobal(topLevelReader), sameInstance(globalOrdinals));
+        // 3 b/c 1 segment level caches and 1 top level cache
+        assertThat(indicesFieldDataCache.getCache().size(), equalTo(4l));
+
+        IndexFieldData.WithOrdinals cachedInstace = null;
+        for (RamUsage ramUsage : indicesFieldDataCache.getCache().asMap().values()) {
+            if (ramUsage instanceof IndexFieldData.WithOrdinals) {
+                cachedInstace = (IndexFieldData.WithOrdinals) ramUsage;
+                break;
+            }
+        }
+        assertThat(cachedInstace, sameInstance(globalOrdinals));
+        topLevelReader.close();
+        // Now only 3 segment level entries, only the toplevel reader has been closed, but the segment readers are still used by IW
+        assertThat(indicesFieldDataCache.getCache().size(), equalTo(3l));
+
+        refreshReader();
+        assertThat(ifd.loadGlobal(topLevelReader), not(sameInstance(globalOrdinals)));
+
+        ifdService.clear();
+        assertThat(indicesFieldDataCache.getCache().size(), equalTo(0l));
     }
 }

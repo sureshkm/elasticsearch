@@ -21,7 +21,6 @@ package org.elasticsearch.search.aggregations.bucket.terms;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.search.aggregations.Aggregator;
 import org.elasticsearch.search.aggregations.bucket.MultiBucketsAggregation;
-import org.elasticsearch.search.aggregations.support.ScriptValueType;
 
 import java.util.Collection;
 import java.util.Comparator;
@@ -34,13 +33,13 @@ public interface Terms extends MultiBucketsAggregation {
 
     static enum ValueType {
 
-        STRING(ScriptValueType.STRING),
-        LONG(ScriptValueType.LONG),
-        DOUBLE(ScriptValueType.DOUBLE);
+        STRING(org.elasticsearch.search.aggregations.support.ValueType.STRING),
+        LONG(org.elasticsearch.search.aggregations.support.ValueType.LONG),
+        DOUBLE(org.elasticsearch.search.aggregations.support.ValueType.DOUBLE);
 
-        final ScriptValueType scriptValueType;
+        final org.elasticsearch.search.aggregations.support.ValueType scriptValueType;
 
-        private ValueType(ScriptValueType scriptValueType) {
+        private ValueType(org.elasticsearch.search.aggregations.support.ValueType scriptValueType) {
             this.scriptValueType = scriptValueType;
         }
 
@@ -95,11 +94,11 @@ public interface Terms extends MultiBucketsAggregation {
         /**
          * Creates a bucket ordering strategy which sorts buckets based on a single-valued calc get
          *
-         * @param   aggregationName the name of the get
+         * @param   path the name of the get
          * @param   asc             The direction of the order (ascending or descending)
          */
-        public static Order aggregation(String aggregationName, boolean asc) {
-            return new InternalOrder.Aggregation(aggregationName, null, asc);
+        public static Order aggregation(String path, boolean asc) {
+            return new InternalOrder.Aggregation(path, asc);
         }
 
         /**
@@ -110,7 +109,7 @@ public interface Terms extends MultiBucketsAggregation {
          * @param   asc             The direction of the order (ascending or descending)
          */
         public static Order aggregation(String aggregationName, String metricName, boolean asc) {
-            return new InternalOrder.Aggregation(aggregationName, metricName, asc);
+            return new InternalOrder.Aggregation(aggregationName + "." + metricName, asc);
         }
 
         /**

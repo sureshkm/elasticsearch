@@ -28,17 +28,19 @@ import org.elasticsearch.index.Index;
 import org.elasticsearch.index.settings.IndexSettings;
 
 /**
- *
+ * Factory for ASCIIFoldingFilter.
  */
 public class ASCIIFoldingTokenFilterFactory extends AbstractTokenFilterFactory {
+    private final boolean preserveOriginal;
 
     @Inject
     public ASCIIFoldingTokenFilterFactory(Index index, @IndexSettings Settings indexSettings, @Assisted String name, @Assisted Settings settings) {
         super(index, indexSettings, name, settings);
+        preserveOriginal = settings.getAsBoolean("preserve_original", false);
     }
 
     @Override
     public TokenStream create(TokenStream tokenStream) {
-        return new ASCIIFoldingFilter(tokenStream);
+        return new ASCIIFoldingFilter(tokenStream, preserveOriginal);
     }
 }

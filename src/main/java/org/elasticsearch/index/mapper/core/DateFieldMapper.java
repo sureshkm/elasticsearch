@@ -38,6 +38,7 @@ import org.elasticsearch.common.joda.Joda;
 import org.elasticsearch.common.lucene.search.NoCacheFilter;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.Fuzziness;
+import org.elasticsearch.common.util.LocaleUtils;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.index.analysis.NamedAnalyzer;
@@ -96,7 +97,7 @@ public class DateFieldMapper extends NumberFieldMapper<Long> {
         private Locale locale;
 
         public Builder(String name) {
-            super(name, new FieldType(Defaults.FIELD_TYPE));
+            super(name, new FieldType(Defaults.FIELD_TYPE), Defaults.PRECISION_STEP_64_BIT);
             builder = this;
             // do *NOT* rely on the default locale
             locale = Locale.ROOT;
@@ -129,7 +130,7 @@ public class DateFieldMapper extends NumberFieldMapper<Long> {
                 dateTimeFormatter = new FormatDateTimeFormatter(dateTimeFormatter.format(), dateTimeFormatter.parser(), dateTimeFormatter.printer(), locale);
             }
             DateFieldMapper fieldMapper = new DateFieldMapper(buildNames(context), dateTimeFormatter,
-                    precisionStep, boost, fieldType, docValues, nullValue, timeUnit, roundCeil, ignoreMalformed(context), coerce(context),
+                    fieldType.numericPrecisionStep(), boost, fieldType, docValues, nullValue, timeUnit, roundCeil, ignoreMalformed(context), coerce(context),
                     postingsProvider, docValuesProvider, similarity, normsLoading, fieldDataSettings, context.indexSettings(),
                     multiFieldsBuilder.build(this, context), copyTo);
             fieldMapper.includeInAll(includeInAll);
@@ -157,31 +158,10 @@ public class DateFieldMapper extends NumberFieldMapper<Long> {
                 } else if (propName.equals("numeric_resolution")) {
                     builder.timeUnit(TimeUnit.valueOf(propNode.toString().toUpperCase(Locale.ROOT)));
                 } else if (propName.equals("locale")) {
-                    builder.locale(parseLocale(propNode.toString()));
+                    builder.locale(LocaleUtils.parse(propNode.toString()));
                 }
             }
             return builder;
-        }
-    }
-
-    // public for test
-    public static Locale parseLocale(String locale) {
-        final String[] parts = locale.split("_", -1);
-        switch (parts.length) {
-            case 3:
-                // lang_country_variant
-                return new Locale(parts[0], parts[1], parts[2]);
-            case 2:
-                // lang_country
-                return new Locale(parts[0], parts[1]);
-            case 1:
-                if ("ROOT".equalsIgnoreCase(parts[0])) {
-                    return Locale.ROOT;
-                }
-                // lang
-                return new Locale(parts[0]);
-            default:
-                throw new ElasticsearchIllegalArgumentException("Can't parse locale: [" + locale + "]");
         }
     }
 
@@ -321,6 +301,9 @@ public class DateFieldMapper extends NumberFieldMapper<Long> {
     }
 
     public long parseToMilliseconds(Object value, @Nullable QueryParseContext context, boolean includeUpper) {
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        }
         long now = context == null ? System.currentTimeMillis() : context.nowInMillis();
         return includeUpper && roundCeil ? dateMathParser.parseRoundCeil(convertToString(value), now) : dateMathParser.parse(convertToString(value), now);
     }
@@ -355,14 +338,22 @@ public class DateFieldMapper extends NumberFieldMapper<Long> {
         Long lowerVal = null;
         Long upperVal = null;
         if (lowerTerm != null) {
-            String value = convertToString(lowerTerm);
-            cache = explicitCaching || !hasNowExpressionWithNoRounding(value);
-            lowerVal = parseToMilliseconds(value, context, false);
+            if (lowerTerm instanceof Number) {
+                lowerVal = ((Number) lowerTerm).longValue();
+            } else {
+                String value = convertToString(lowerTerm);
+                cache = explicitCaching || !hasNowExpressionWithNoRounding(value);
+                lowerVal = parseToMilliseconds(value, context, false);
+            }
         }
         if (upperTerm != null) {
-            String value = convertToString(upperTerm);
-            cache = explicitCaching || !hasNowExpressionWithNoRounding(value);
-            upperVal = parseToMilliseconds(value, context, includeUpper);
+            if (upperTerm instanceof Number) {
+                upperVal = ((Number) upperTerm).longValue();
+            } else {
+                String value = convertToString(upperTerm);
+                cache = explicitCaching || !hasNowExpressionWithNoRounding(value);
+                upperVal = parseToMilliseconds(value, context, includeUpper);
+            }
         }
 
         Filter filter =  NumericRangeFilter.newLongRange(
@@ -387,14 +378,22 @@ public class DateFieldMapper extends NumberFieldMapper<Long> {
         Long lowerVal = null;
         Long upperVal = null;
         if (lowerTerm != null) {
-            String value = convertToString(lowerTerm);
-            cache = explicitCaching || !hasNowExpressionWithNoRounding(value);
-            lowerVal = parseToMilliseconds(value, context, false);
+            if (lowerTerm instanceof Number) {
+                lowerVal = ((Number) lowerTerm).longValue();
+            } else {
+                String value = convertToString(lowerTerm);
+                cache = explicitCaching || !hasNowExpressionWithNoRounding(value);
+                lowerVal = parseToMilliseconds(value, context, false);
+            }
         }
         if (upperTerm != null) {
-            String value = convertToString(upperTerm);
-            cache = explicitCaching || !hasNowExpressionWithNoRounding(value);
-            upperVal = parseToMilliseconds(value, context, includeUpper);
+            if (upperTerm instanceof Number) {
+                upperVal = ((Number) upperTerm).longValue();
+            } else {
+                String value = convertToString(upperTerm);
+                cache = explicitCaching || !hasNowExpressionWithNoRounding(value);
+                upperVal = parseToMilliseconds(value, context, includeUpper);
+            }
         }
 
         Filter filter =  NumericRangeFieldDataFilter.newLongRange(
@@ -543,7 +542,7 @@ public class DateFieldMapper extends NumberFieldMapper<Long> {
     protected void doXContentBody(XContentBuilder builder, boolean includeDefaults, Params params) throws IOException {
         super.doXContentBody(builder, includeDefaults, params);
 
-        if (includeDefaults || precisionStep != Defaults.PRECISION_STEP) {
+        if (includeDefaults || precisionStep != Defaults.PRECISION_STEP_64_BIT) {
             builder.field("precision_step", precisionStep);
         }
         builder.field("format", dateTimeFormatter.format());

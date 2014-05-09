@@ -4,16 +4,17 @@
     "methods": ["DELETE"],
     "url": {
       "path": "/_search/scroll/{scroll_id}",
-      "paths": ["/_search/scroll/{scroll_id}"],
+      "paths": ["/_search/scroll/{scroll_id}", "/_search/scroll"],
       "parts": {
         "scroll_id": {
           "type" : "list",
-          "required" : "true",
           "description" : "A comma-separated list of scroll IDs to clear"
         }
       },
       "params": {}
     },
-    "body": null
+    "body": {
+      "description": "A comma-separated list of scroll IDs to clear if none was specified via the scroll_id parameter"
+    }
   }
 }

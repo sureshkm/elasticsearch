@@ -19,11 +19,9 @@
 
 package org.elasticsearch.rest.action.cat;
 
-import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.count.CountRequest;
 import org.elasticsearch.action.count.CountResponse;
 import org.elasticsearch.action.support.QuerySourceBuilder;
-import org.elasticsearch.action.support.broadcast.BroadcastOperationThreading;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.Table;
@@ -32,13 +30,13 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.rest.RestChannel;
 import org.elasticsearch.rest.RestController;
 import org.elasticsearch.rest.RestRequest;
-import org.elasticsearch.rest.XContentThrowableRestResponse;
+import org.elasticsearch.rest.RestResponse;
 import org.elasticsearch.rest.action.support.RestActions;
+import org.elasticsearch.rest.action.support.RestResponseListener;
 import org.elasticsearch.rest.action.support.RestTable;
 import org.joda.time.format.DateTimeFormat;
 import org.joda.time.format.DateTimeFormatter;
 
-import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
 import static org.elasticsearch.rest.RestRequest.Method.GET;
@@ -62,8 +60,6 @@ public class RestCountAction extends AbstractCatAction {
     public void doRequest(final RestRequest request, final RestChannel channel) {
         String[] indices = Strings.splitStringByCommaToArray(request.param("index"));
         CountRequest countRequest = new CountRequest(indices);
-        countRequest.operationThreading(BroadcastOperationThreading.SINGLE_THREAD);
-
         String source = request.param("source");
         if (source != null) {
             countRequest.source(source);
@@ -74,23 +70,10 @@ public class RestCountAction extends AbstractCatAction {
             }
         }
 
-        client.count(countRequest, new ActionListener<CountResponse>() {
+        client.count(countRequest, new RestResponseListener<CountResponse>(channel) {
             @Override
-            public void onResponse(CountResponse countResponse) {
-                try {
-                    channel.sendResponse(RestTable.buildResponse(buildTable(request, countResponse), request, channel));
-                } catch (Throwable t) {
-                    onFailure(t);
-                }
-            }
-
-            @Override
-            public void onFailure(Throwable t) {
-                try {
-                    channel.sendResponse(new XContentThrowableRestResponse(request, t));
-                } catch (IOException e) {
-                    logger.error("Failed to send failure response", e);
-                }
+            public RestResponse buildResponse(CountResponse countResponse) throws Exception {
+                return RestTable.buildResponse(buildTable(request, countResponse), channel);
             }
         });
     }

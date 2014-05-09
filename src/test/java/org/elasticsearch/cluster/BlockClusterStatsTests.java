@@ -24,16 +24,16 @@ import org.elasticsearch.action.admin.indices.settings.put.UpdateSettingsRespons
 import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
 import org.elasticsearch.test.ElasticsearchIntegrationTest.ClusterScope;
-import org.elasticsearch.test.ElasticsearchIntegrationTest.Scope;
 import org.junit.Test;
 
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 
 /**
  * Scoped as test, because the if the test with cluster read only block fails, all other tests fail as well, as this is not cleaned up properly
  */
-@ClusterScope(scope=Scope.TEST)
+@ClusterScope(scope= ElasticsearchIntegrationTest.Scope.TEST)
 public class BlockClusterStatsTests extends ElasticsearchIntegrationTest {
 
     @Test
@@ -53,5 +53,7 @@ public class BlockClusterStatsTests extends ElasticsearchIntegrationTest {
         ClusterStateResponse clusterStateResponse = client().admin().cluster().prepareState().clear().get();
         assertThat(clusterStateResponse.getState().blocks().global(), hasSize(0));
         assertThat(clusterStateResponse.getState().blocks().indices().size(), is(0));
+        assertAcked(client().admin().cluster().prepareUpdateSettings().setTransientSettings(
+                ImmutableSettings.settingsBuilder().put("cluster.blocks.read_only", false).build()).get());
     }
 }

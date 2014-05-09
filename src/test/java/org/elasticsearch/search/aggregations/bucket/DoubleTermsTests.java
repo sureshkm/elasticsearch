@@ -21,28 +21,29 @@ package org.elasticsearch.search.aggregations.bucket;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.action.search.SearchResponse;
-import org.elasticsearch.common.settings.ImmutableSettings;
-import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.index.query.FilterBuilders;
 import org.elasticsearch.index.query.functionscore.ScoreFunctionBuilders;
+import org.elasticsearch.search.aggregations.bucket.filter.Filter;
 import org.elasticsearch.search.aggregations.bucket.histogram.Histogram;
 import org.elasticsearch.search.aggregations.bucket.terms.Terms;
 import org.elasticsearch.search.aggregations.metrics.avg.Avg;
+import org.elasticsearch.search.aggregations.metrics.max.Max;
 import org.elasticsearch.search.aggregations.metrics.stats.Stats;
 import org.elasticsearch.search.aggregations.metrics.stats.extended.ExtendedStats;
 import org.elasticsearch.search.aggregations.metrics.sum.Sum;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
 import org.hamcrest.Matchers;
-import org.junit.Before;
 import org.junit.Test;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 
 import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
 import static org.elasticsearch.index.query.QueryBuilders.functionScoreQuery;
 import static org.elasticsearch.index.query.QueryBuilders.matchAllQuery;
 import static org.elasticsearch.search.aggregations.AggregationBuilders.*;
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertSearchResponse;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
@@ -51,45 +52,42 @@ import static org.hamcrest.core.IsNull.notNullValue;
 /**
  *
  */
+@ElasticsearchIntegrationTest.SuiteScopeTest
 public class DoubleTermsTests extends ElasticsearchIntegrationTest {
 
     private static final int NUM_DOCS = 5; // TODO: randomize the size?
     private static final String SINGLE_VALUED_FIELD_NAME = "d_value";
     private static final String MULTI_VALUED_FIELD_NAME = "d_values";
 
-    @Override
-    public Settings indexSettings() {
-        return ImmutableSettings.builder()
-                .put("index.number_of_shards", between(1, 5))
-                .put("index.number_of_replicas", between(0, 1))
-                .build();
-    }
-
-    @Before
-    public void init() throws Exception {
+    public void setupSuiteScopeCluster() throws Exception {
         createIndex("idx");
+        List<IndexRequestBuilder> builders = new ArrayList<>();
+        for (int i = 0; i < NUM_DOCS; i++) {
+            builders.add(client().prepareIndex("idx", "type").setSource(jsonBuilder()
+                    .startObject()
+                    .field(SINGLE_VALUED_FIELD_NAME, (double) i)
+                    .field("num_tag", i < NUM_DOCS/2 + 1 ? 1 : 0) // used to test order by single-bucket sub agg
+                    .startArray(MULTI_VALUED_FIELD_NAME).value((double) i).value(i + 1d).endArray()
+                    .endObject()));
 
-        IndexRequestBuilder[] lowcardBuilders = new IndexRequestBuilder[NUM_DOCS];
-        for (int i = 0; i < lowcardBuilders.length; i++) {
-            lowcardBuilders[i] = client().prepareIndex("idx", "type").setSource(jsonBuilder()
+        }
+        for (int i = 0; i < 100; i++) {
+            builders.add(client().prepareIndex("idx", "high_card_type").setSource(jsonBuilder()
                     .startObject()
                     .field(SINGLE_VALUED_FIELD_NAME, (double) i)
                     .startArray(MULTI_VALUED_FIELD_NAME).value((double)i).value(i + 1d).endArray()
-                    .endObject());
-
+                    .endObject()));
         }
-        indexRandom(randomBoolean(), lowcardBuilders);
-        IndexRequestBuilder[] highCardBuilders = new IndexRequestBuilder[100]; // TODO: randomize the size?
-        for (int i = 0; i < highCardBuilders.length; i++) {
-            highCardBuilders[i] = client().prepareIndex("idx", "high_card_type").setSource(jsonBuilder()
-                    .startObject()
-                    .field(SINGLE_VALUED_FIELD_NAME, (double) i)
-                    .startArray(MULTI_VALUED_FIELD_NAME).value((double)i).value(i + 1d).endArray()
-                    .endObject());
-        }
-        indexRandom(true, highCardBuilders);
 
         createIndex("idx_unmapped");
+        assertAcked(prepareCreate("empty_bucket_idx").addMapping("type", SINGLE_VALUED_FIELD_NAME, "type=integer"));
+        for (int i = 0; i < 2; i++) {
+            builders.add(client().prepareIndex("empty_bucket_idx", "type", ""+i).setSource(jsonBuilder()
+                    .startObject()
+                    .field(SINGLE_VALUED_FIELD_NAME, i*2)
+                    .endObject()));
+        }
+        indexRandom(true, builders);
         ensureSearchable();
     }
 
@@ -615,16 +613,6 @@ public class DoubleTermsTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void emptyAggregation() throws Exception {
-        prepareCreate("empty_bucket_idx").addMapping("type", SINGLE_VALUED_FIELD_NAME, "type=integer").execute().actionGet();
-        List<IndexRequestBuilder> builders = new ArrayList<IndexRequestBuilder>();
-        for (int i = 0; i < 2; i++) {
-            builders.add(client().prepareIndex("empty_bucket_idx", "type", ""+i).setSource(jsonBuilder()
-                    .startObject()
-                    .field(SINGLE_VALUED_FIELD_NAME, i*2)
-                    .endObject()));
-        }
-        indexRandom(true, builders.toArray(new IndexRequestBuilder[builders.size()]));
-
         SearchResponse searchResponse = client().prepareSearch("empty_bucket_idx")
                 .setQuery(matchAllQuery())
                 .addAggregation(histogram("histo").field(SINGLE_VALUED_FIELD_NAME).interval(1l).minDocCount(0)
@@ -673,8 +661,98 @@ public class DoubleTermsTests extends ElasticsearchIntegrationTest {
     }
 
     @Test
-    public void singleValuedField_OrderedByMissingSubAggregation() throws Exception {
+    public void singleValuedField_OrderedBySingleBucketSubAggregationAsc() throws Exception {
+        boolean asc = randomBoolean();
+        SearchResponse response = client().prepareSearch("idx").setTypes("type")
+                .addAggregation(terms("num_tags")
+                        .field("num_tag")
+                        .order(Terms.Order.aggregation("filter", asc))
+                        .subAggregation(filter("filter").filter(FilterBuilders.matchAllFilter()))
+                ).execute().actionGet();
 
+
+        assertSearchResponse(response);
+
+        Terms tags = response.getAggregations().get("num_tags");
+        assertThat(tags, notNullValue());
+        assertThat(tags.getName(), equalTo("num_tags"));
+        assertThat(tags.getBuckets().size(), equalTo(2));
+
+        Iterator<Terms.Bucket> iters = tags.getBuckets().iterator();
+
+        Terms.Bucket tag = iters.next();
+        assertThat(tag, notNullValue());
+        assertThat(key(tag), equalTo(asc ? "0" : "1"));
+        assertThat(tag.getDocCount(), equalTo(asc ? 2l : 3l));
+        Filter filter = tag.getAggregations().get("filter");
+        assertThat(filter, notNullValue());
+        assertThat(filter.getDocCount(), equalTo(asc ? 2l : 3l));
+
+        tag = iters.next();
+        assertThat(tag, notNullValue());
+        assertThat(key(tag), equalTo(asc ? "1" : "0"));
+        assertThat(tag.getDocCount(), equalTo(asc ? 3l : 2l));
+        filter = tag.getAggregations().get("filter");
+        assertThat(filter, notNullValue());
+        assertThat(filter.getDocCount(), equalTo(asc ? 3l : 2l));
+    }
+
+    @Test
+    public void singleValuedField_OrderedBySubAggregationAsc_MultiHierarchyLevels() throws Exception {
+        boolean asc = randomBoolean();
+        SearchResponse response = client().prepareSearch("idx").setTypes("type")
+                .addAggregation(terms("tags")
+                        .field("num_tag")
+                        .order(Terms.Order.aggregation("filter1>filter2>max", asc))
+                        .subAggregation(filter("filter1").filter(FilterBuilders.matchAllFilter())
+                                .subAggregation(filter("filter2").filter(FilterBuilders.matchAllFilter())
+                                        .subAggregation(max("max").field(SINGLE_VALUED_FIELD_NAME))))
+                ).execute().actionGet();
+
+
+        assertSearchResponse(response);
+
+        Terms tags = response.getAggregations().get("tags");
+        assertThat(tags, notNullValue());
+        assertThat(tags.getName(), equalTo("tags"));
+        assertThat(tags.getBuckets().size(), equalTo(2));
+
+        Iterator<Terms.Bucket> iters = tags.getBuckets().iterator();
+
+        // the max for "1" is 2
+        // the max for "0" is 4
+
+        Terms.Bucket tag = iters.next();
+        assertThat(tag, notNullValue());
+        assertThat(key(tag), equalTo(asc ? "1" : "0"));
+        assertThat(tag.getDocCount(), equalTo(asc ? 3l : 2l));
+        Filter filter1 = tag.getAggregations().get("filter1");
+        assertThat(filter1, notNullValue());
+        assertThat(filter1.getDocCount(), equalTo(asc ? 3l : 2l));
+        Filter filter2 = filter1.getAggregations().get("filter2");
+        assertThat(filter2, notNullValue());
+        assertThat(filter2.getDocCount(), equalTo(asc ? 3l : 2l));
+        Max max = filter2.getAggregations().get("max");
+        assertThat(max, notNullValue());
+        assertThat(max.getValue(), equalTo(asc ? 2.0 : 4.0));
+
+        tag = iters.next();
+        assertThat(tag, notNullValue());
+        assertThat(key(tag), equalTo(asc ? "0" : "1"));
+        assertThat(tag.getDocCount(), equalTo(asc ? 2l : 3l));
+        filter1 = tag.getAggregations().get("filter1");
+        assertThat(filter1, notNullValue());
+        assertThat(filter1.getDocCount(), equalTo(asc ? 2l : 3l));
+        filter2 = filter1.getAggregations().get("filter2");
+        assertThat(filter2, notNullValue());
+        assertThat(filter2.getDocCount(), equalTo(asc ? 2l : 3l));
+        max = filter2.getAggregations().get("max");
+        assertThat(max, notNullValue());
+        assertThat(max.getValue(), equalTo(asc ? 4.0 : 2.0));
+    }
+
+    @Test
+    public void singleValuedField_OrderedByMissingSubAggregation() throws Exception {
         try {
 
             client().prepareSearch("idx").setTypes("type")
@@ -691,15 +769,14 @@ public class DoubleTermsTests extends ElasticsearchIntegrationTest {
     }
 
     @Test
-    public void singleValuedField_OrderedByNonMetricsSubAggregation() throws Exception {
-
+    public void singleValuedField_OrderedByNonMetricsOrMultiBucketSubAggregation() throws Exception {
         try {
 
             client().prepareSearch("idx").setTypes("type")
                     .addAggregation(terms("terms")
                             .field(SINGLE_VALUED_FIELD_NAME)
-                            .order(Terms.Order.aggregation("filter", true))
-                            .subAggregation(filter("filter").filter(FilterBuilders.termFilter("foo", "bar")))
+                            .order(Terms.Order.aggregation("num_tags", true))
+                            .subAggregation(terms("num_tags").field("num_tags"))
                     ).execute().actionGet();
 
             fail("Expected search to fail when trying to sort terms aggregation by sug-aggregation which is not of a metrics type");
@@ -711,7 +788,6 @@ public class DoubleTermsTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void singleValuedField_OrderedByMultiValuedSubAggregation_WithUknownMetric() throws Exception {
-
         try {
 
             client().prepareSearch("idx").setTypes("type")
@@ -731,7 +807,6 @@ public class DoubleTermsTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void singleValuedField_OrderedByMultiValuedSubAggregation_WithoutMetric() throws Exception {
-
         try {
 
             client().prepareSearch("idx").setTypes("type")

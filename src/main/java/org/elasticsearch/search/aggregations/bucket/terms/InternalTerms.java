@@ -20,9 +20,9 @@ package org.elasticsearch.search.aggregations.bucket.terms;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import org.elasticsearch.cache.recycler.CacheRecycler;
 import org.elasticsearch.common.io.stream.Streamable;
 import org.elasticsearch.common.text.Text;
+import org.elasticsearch.common.util.BigArrays;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.search.aggregations.Aggregations;
 import org.elasticsearch.search.aggregations.InternalAggregation;
@@ -58,14 +58,14 @@ public abstract class InternalTerms extends InternalAggregation implements Terms
             return aggregations;
         }
 
-        public Bucket reduce(List<? extends Bucket> buckets, CacheRecycler cacheRecycler) {
+        public Bucket reduce(List<? extends Bucket> buckets, BigArrays bigArrays) {
             if (buckets.size() == 1) {
                 Bucket bucket = buckets.get(0);
-                bucket.aggregations.reduce(cacheRecycler);
+                bucket.aggregations.reduce(bigArrays);
                 return bucket;
             }
             Bucket reduced = null;
-            List<InternalAggregations> aggregationsList = new ArrayList<InternalAggregations>(buckets.size());
+            List<InternalAggregations> aggregationsList = new ArrayList<>(buckets.size());
             for (Bucket bucket : buckets) {
                 if (reduced == null) {
                     reduced = bucket;
@@ -74,7 +74,7 @@ public abstract class InternalTerms extends InternalAggregation implements Terms
                 }
                 aggregationsList.add(bucket.aggregations);
             }
-            reduced.aggregations = InternalAggregations.reduce(aggregationsList, cacheRecycler);
+            reduced.aggregations = InternalAggregations.reduce(aggregationsList, bigArrays);
             return reduced;
         }
     }
@@ -117,7 +117,7 @@ public abstract class InternalTerms extends InternalAggregation implements Terms
         List<InternalAggregation> aggregations = reduceContext.aggregations();
         if (aggregations.size() == 1) {
             InternalTerms terms = (InternalTerms) aggregations.get(0);
-            terms.trimExcessEntries(reduceContext.cacheRecycler());
+            terms.trimExcessEntries(reduceContext.bigArrays());
             return terms;
         }
 
@@ -133,12 +133,12 @@ public abstract class InternalTerms extends InternalAggregation implements Terms
                 reduced = terms;
             }
             if (buckets == null) {
-                buckets = new HashMap<Text, List<Bucket>>(terms.buckets.size());
+                buckets = new HashMap<>(terms.buckets.size());
             }
             for (Bucket bucket : terms.buckets) {
                 List<Bucket> existingBuckets = buckets.get(bucket.getKeyAsText());
                 if (existingBuckets == null) {
-                    existingBuckets = new ArrayList<Bucket>(aggregations.size());
+                    existingBuckets = new ArrayList<>(aggregations.size());
                     buckets.put(bucket.getKeyAsText(), existingBuckets);
                 }
                 existingBuckets.add(bucket);
@@ -154,7 +154,7 @@ public abstract class InternalTerms extends InternalAggregation implements Terms
         BucketPriorityQueue ordered = new BucketPriorityQueue(size, order.comparator(null));
         for (Map.Entry<Text, List<Bucket>> entry : buckets.entrySet()) {
             List<Bucket> sameTermBuckets = entry.getValue();
-            final Bucket b = sameTermBuckets.get(0).reduce(sameTermBuckets, reduceContext.cacheRecycler());
+            final Bucket b = sameTermBuckets.get(0).reduce(sameTermBuckets, reduceContext.bigArrays());
             if (b.docCount >= minDocCount) {
                 ordered.insertWithOverflow(b);
             }
@@ -167,7 +167,7 @@ public abstract class InternalTerms extends InternalAggregation implements Terms
         return reduced;
     }
 
-    final void trimExcessEntries(CacheRecycler cacheRecycler) {
+    final void trimExcessEntries(BigArrays bigArrays) {
         final List<Bucket> newBuckets = Lists.newArrayList();
         for (Bucket b : buckets) {
             if (newBuckets.size() >= requiredSize) {
@@ -175,7 +175,7 @@ public abstract class InternalTerms extends InternalAggregation implements Terms
             }
             if (b.docCount >= minDocCount) {
                 newBuckets.add(b);
-                b.aggregations.reduce(cacheRecycler);
+                b.aggregations.reduce(bigArrays);
             }
         }
         buckets = newBuckets;

@@ -126,18 +126,27 @@ public class IndicesOptions {
     }
 
     /**
-     * @return indices options that requires any specified index to exists, expands wildcards only to open indices and
-     *         allow that no indices are resolved from wildcard expressions (not returning an error).
+     * @return indices options that requires every specified index to exist, expands wildcards only to open indices and
+     *         allows that no indices are resolved from wildcard expressions (not returning an error).
      */
-    public static IndicesOptions strict() {
+    public static IndicesOptions strictExpandOpen() {
         return VALUES[6];
     }
 
+
     /**
-     * @return indices options that ignore unavailable indices, expand wildcards only to open indices and
-     *         allow that no indices are resolved from wildcard expressions (not returning an error).
+     * @return indices option that requires every specified index to exist, expands wildcards to both open and closed
+     * indices and allows that no indices are resolved from wildcard expressions (not returning an error).
      */
-    public static IndicesOptions lenient() {
+    public static IndicesOptions strictExpand() {
+        return VALUES[14];
+    }
+
+    /**
+     * @return indices options that ignores unavailable indices, expands wildcards only to open indices and
+     *         allows that no indices are resolved from wildcard expressions (not returning an error).
+     */
+    public static IndicesOptions lenientExpandOpen() {
         return VALUES[7];
     }
 

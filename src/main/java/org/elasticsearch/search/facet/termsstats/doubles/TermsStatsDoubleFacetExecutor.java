@@ -74,12 +74,12 @@ public class TermsStatsDoubleFacetExecutor extends FacetExecutor {
     @Override
     public InternalFacet buildFacet(String facetName) {
         if (entries.v().isEmpty()) {
-            entries.release();
+            entries.close();
             return new InternalTermsStatsDoubleFacet(facetName, comparatorType, size, ImmutableList.<InternalTermsStatsDoubleFacet.DoubleEntry>of(), missing);
         }
         if (size == 0) { // all terms
             // all terms, just return the collection, we will sort it on the way back
-            List<InternalTermsStatsDoubleFacet.DoubleEntry> doubleEntries = new ArrayList<InternalTermsStatsDoubleFacet.DoubleEntry>(entries.v().size());
+            List<InternalTermsStatsDoubleFacet.DoubleEntry> doubleEntries = new ArrayList<>(entries.v().size());
             boolean[] states = entries.v().allocated;
             Object[] values = entries.v().values;
             for (int i = 0; i < states.length; i++) {
@@ -87,7 +87,7 @@ public class TermsStatsDoubleFacetExecutor extends FacetExecutor {
                     doubleEntries.add((InternalTermsStatsDoubleFacet.DoubleEntry) values[i]);
                 }
             }
-            entries.release();
+            entries.close();
             return new InternalTermsStatsDoubleFacet(facetName, comparatorType, 0 /* indicates all terms*/, doubleEntries, missing);
         }
         Object[] values = entries.v().values;
@@ -103,7 +103,7 @@ public class TermsStatsDoubleFacetExecutor extends FacetExecutor {
             ordered.add(value);
         }
 
-        entries.release();
+        entries.close();
         return new InternalTermsStatsDoubleFacet(facetName, comparatorType, size, ordered, missing);
     }
 

@@ -122,13 +122,10 @@ public class IndexWarmersMetaData implements IndexMetaData.Custom {
                 map = (Map<String, Object>) map.values().iterator().next();
             }
             XContentBuilder builder = XContentFactory.smileBuilder().map(map);
-            XContentParser parser = XContentFactory.xContent(XContentType.SMILE).createParser(builder.bytes());
-            try {
+            try (XContentParser parser = XContentFactory.xContent(XContentType.SMILE).createParser(builder.bytes())) {
                 // move to START_OBJECT
                 parser.nextToken();
                 return fromXContent(parser);
-            } finally {
-                parser.close();
             }
         }
 
@@ -137,13 +134,13 @@ public class IndexWarmersMetaData implements IndexMetaData.Custom {
             // we get here after we are at warmers token
             String currentFieldName = null;
             XContentParser.Token token;
-            List<Entry> entries = new ArrayList<Entry>();
+            List<Entry> entries = new ArrayList<>();
             while ((token = parser.nextToken()) != XContentParser.Token.END_OBJECT) {
                 if (token == XContentParser.Token.FIELD_NAME) {
                     currentFieldName = parser.currentName();
                 } else if (token == XContentParser.Token.START_OBJECT) {
                     String name = currentFieldName;
-                    List<String> types = new ArrayList<String>(2);
+                    List<String> types = new ArrayList<>(2);
                     BytesReference source = null;
                     while ((token = parser.nextToken()) != XContentParser.Token.END_OBJECT) {
                         if (token == XContentParser.Token.FIELD_NAME) {

@@ -18,6 +18,7 @@
  */
 package org.elasticsearch.index.fielddata.plain;
 
+import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.PagedBytes;
 import org.apache.lucene.util.PagedBytes.Reader;
@@ -34,11 +35,10 @@ import org.elasticsearch.index.fielddata.ordinals.Ordinals.Docs;
  */
 public class PagedBytesAtomicFieldData implements AtomicFieldData.WithOrdinals<ScriptDocValues.Strings> {
 
-    public static PagedBytesAtomicFieldData empty(int numDocs) {
-        return new Empty(numDocs);
+    public static PagedBytesAtomicFieldData empty() {
+        return new Empty();
     }
 
-    // 0 ordinal in values means no value (its null)
     private final PagedBytes.Reader bytes;
     private final MonotonicAppendingLongBuffer termOrdToBytesOffset;
     protected final Ordinals ordinals;
@@ -64,18 +64,8 @@ public class PagedBytesAtomicFieldData implements AtomicFieldData.WithOrdinals<S
     }
 
     @Override
-    public int getNumDocs() {
-        return ordinals.getNumDocs();
-    }
-
-    @Override
     public long getNumberUniqueValues() {
-        return ordinals.getNumOrds();
-    }
-
-    @Override
-    public boolean isValuesOrdered() {
-        return true;
+        return ordinals.getMaxOrd() - Ordinals.MIN_ORDINAL;
     }
 
     @Override
@@ -94,7 +84,7 @@ public class PagedBytesAtomicFieldData implements AtomicFieldData.WithOrdinals<S
     private final IntArray getHashes() {
         if (hashes == null) {
             long numberOfValues = termOrdToBytesOffset.size();
-            IntArray hashes = BigArrays.newIntArray(numberOfValues);
+            IntArray hashes = BigArrays.NON_RECYCLING_INSTANCE.newIntArray(numberOfValues);
             BytesRef scratch = new BytesRef();
             for (long i = 0; i < numberOfValues; i++) {
                 bytes.fill(scratch, termOrdToBytesOffset.get(i));
@@ -118,6 +108,11 @@ public class PagedBytesAtomicFieldData implements AtomicFieldData.WithOrdinals<S
     @Override
     public ScriptDocValues.Strings getScriptValues() {
         return new ScriptDocValues.Strings(getBytesValues(false));
+    }
+
+    @Override
+    public TermsEnum getTermsEnum() {
+        return new AtomicFieldDataWithOrdinalsTermsEnum(this);
     }
 
     static class BytesValues extends org.elasticsearch.index.fielddata.BytesValues.WithOrdinals {
@@ -178,8 +173,8 @@ public class PagedBytesAtomicFieldData implements AtomicFieldData.WithOrdinals<S
 
     private final static class Empty extends PagedBytesAtomicFieldData {
 
-        Empty(int numDocs) {
-            super(emptyBytes(), 0, new MonotonicAppendingLongBuffer(), new EmptyOrdinals(numDocs));
+        Empty() {
+            super(emptyBytes(), 0, new MonotonicAppendingLongBuffer(), EmptyOrdinals.INSTANCE);
         }
 
         static PagedBytes.Reader emptyBytes() {
@@ -194,18 +189,8 @@ public class PagedBytesAtomicFieldData implements AtomicFieldData.WithOrdinals<S
         }
 
         @Override
-        public int getNumDocs() {
-            return ordinals.getNumDocs();
-        }
-
-        @Override
         public long getNumberUniqueValues() {
             return 0;
-        }
-
-        @Override
-        public boolean isValuesOrdered() {
-            return true;
         }
 
         @Override

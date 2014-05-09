@@ -48,6 +48,7 @@ import java.io.Reader;
 import java.util.*;
 
 import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.hamcrest.Matchers.equalTo;
 
 public abstract class AbstractTermVectorTests extends ElasticsearchIntegrationTest {
@@ -180,21 +181,18 @@ public abstract class AbstractTermVectorTests extends ElasticsearchIntegrationTe
         }
     }
 
-    protected void createIndexBasedOnFieldSettings(TestFieldSetting[] fieldSettings, int number_of_shards) throws IOException {
-        wipeIndices("test");
+    protected void createIndexBasedOnFieldSettings(String index, TestFieldSetting[] fieldSettings) throws IOException {
         XContentBuilder mappingBuilder = jsonBuilder();
         mappingBuilder.startObject().startObject("type1").startObject("properties");
         for (TestFieldSetting field : fieldSettings) {
             field.addToMappings(mappingBuilder);
         }
+        mappingBuilder.endObject().endObject().endObject();
         ImmutableSettings.Builder settings = ImmutableSettings.settingsBuilder()
+                .put(indexSettings())
                 .put("index.analysis.analyzer.tv_test.tokenizer", "standard")
                 .putArray("index.analysis.analyzer.tv_test.filter", "type_as_payload", "lowercase");
-        if (number_of_shards > 0) {
-            settings.put("number_of_shards", number_of_shards);
-        }
-        mappingBuilder.endObject().endObject().endObject();
-        prepareCreate("test").addMapping("type1", mappingBuilder).setSettings(settings).get();
+        assertAcked(prepareCreate(index).addMapping("type1", mappingBuilder).setSettings(settings));
 
         ensureYellow();
     }
@@ -210,7 +208,7 @@ public abstract class AbstractTermVectorTests extends ElasticsearchIntegrationTe
                 "Transforming a data stream (such as when using a scrambler in telecommunications)."};
 
         String[] contentArray = new String[fieldSettings.length];
-        Map<String, Object> docSource = new HashMap<String, Object>();
+        Map<String, Object> docSource = new HashMap<>();
         TestDoc[] testDocs = new TestDoc[numberOfDocs];
         for (int docId = 0; docId < numberOfDocs; docId++) {
             docSource.clear();
@@ -229,13 +227,13 @@ public abstract class AbstractTermVectorTests extends ElasticsearchIntegrationTe
     }
 
     protected TestConfig[] generateTestConfigs(int numberOfTests, TestDoc[] testDocs, TestFieldSetting[] fieldSettings) {
-        ArrayList<TestConfig> configs = new ArrayList<TestConfig>();
+        ArrayList<TestConfig> configs = new ArrayList<>();
         for (int i = 0; i < numberOfTests; i++) {
 
             ArrayList<String> selectedFields = null;
             if (randomBoolean()) {
                 // used field selection
-                selectedFields = new ArrayList<String>();
+                selectedFields = new ArrayList<>();
                 if (randomBoolean()) {
                     selectedFields.add("Doesnt_exist"); // this will be ignored.
                 }
@@ -275,7 +273,7 @@ public abstract class AbstractTermVectorTests extends ElasticsearchIntegrationTe
 
     protected DirectoryReader indexDocsWithLucene(TestDoc[] testDocs) throws IOException {
 
-        Map<String, Analyzer> mapping = new HashMap<String, Analyzer>();
+        Map<String, Analyzer> mapping = new HashMap<>();
         for (TestFieldSetting field : testDocs[0].fieldSettings) {
             if (field.storedPayloads) {
                 mapping.put(field.name, new Analyzer() {
@@ -322,7 +320,7 @@ public abstract class AbstractTermVectorTests extends ElasticsearchIntegrationTe
 
     protected void validateResponse(TermVectorResponse esResponse, Fields luceneFields, TestConfig testConfig) throws IOException {
         TestDoc testDoc = testConfig.doc;
-        HashSet<String> selectedFields = testConfig.selectedFields == null ? null : new HashSet<String>(
+        HashSet<String> selectedFields = testConfig.selectedFields == null ? null : new HashSet<>(
                 Arrays.asList(testConfig.selectedFields));
         Fields esTermVectorFields = esResponse.getFields();
         for (TestFieldSetting field : testDoc.fieldSettings) {

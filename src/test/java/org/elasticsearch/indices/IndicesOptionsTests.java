@@ -28,7 +28,6 @@ import org.elasticsearch.action.admin.indices.alias.get.GetAliasesRequestBuilder
 import org.elasticsearch.action.admin.indices.cache.clear.ClearIndicesCacheRequestBuilder;
 import org.elasticsearch.action.admin.indices.exists.types.TypesExistsRequestBuilder;
 import org.elasticsearch.action.admin.indices.flush.FlushRequestBuilder;
-import org.elasticsearch.action.admin.indices.gateway.snapshot.GatewaySnapshotRequestBuilder;
 import org.elasticsearch.action.admin.indices.mapping.get.GetFieldMappingsRequestBuilder;
 import org.elasticsearch.action.admin.indices.mapping.get.GetMappingsRequestBuilder;
 import org.elasticsearch.action.admin.indices.optimize.OptimizeRequestBuilder;
@@ -37,7 +36,6 @@ import org.elasticsearch.action.admin.indices.segments.IndicesSegmentsRequestBui
 import org.elasticsearch.action.admin.indices.settings.get.GetSettingsRequestBuilder;
 import org.elasticsearch.action.admin.indices.settings.get.GetSettingsResponse;
 import org.elasticsearch.action.admin.indices.stats.IndicesStatsRequestBuilder;
-import org.elasticsearch.action.admin.indices.status.IndicesStatusRequestBuilder;
 import org.elasticsearch.action.admin.indices.validate.query.ValidateQueryRequestBuilder;
 import org.elasticsearch.action.admin.indices.warmer.get.GetWarmersRequestBuilder;
 import org.elasticsearch.action.count.CountRequestBuilder;
@@ -72,7 +70,7 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void testSpecifiedIndexUnavailable() throws Exception {
-        assertAcked(prepareCreate("test1"));
+        createIndex("test1");
         ensureYellow();
 
         // Verify defaults
@@ -81,10 +79,8 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
         verify(count("test1", "test2"), true);
         verify(clearCache("test1", "test2"), true);
         verify(_flush("test1", "test2"),true);
-        verify(gatewatSnapshot("test1", "test2"), true);
         verify(segments("test1", "test2"), true);
         verify(stats("test1", "test2"), true);
-        verify(status("test1", "test2"), true);
         verify(optimize("test1", "test2"), true);
         verify(refresh("test1", "test2"), true);
         verify(validateQuery("test1", "test2"), true);
@@ -100,16 +96,14 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
         verify(getWarmer("test1", "test2"), true);
         verify(getSettings("test1", "test2"), true);
 
-        IndicesOptions options = IndicesOptions.strict();
+        IndicesOptions options = IndicesOptions.strictExpandOpen();
         verify(search("test1", "test2").setIndicesOptions(options), true);
         verify(msearch(options, "test1", "test2"), true);
         verify(count("test1", "test2").setIndicesOptions(options), true);
         verify(clearCache("test1", "test2").setIndicesOptions(options), true);
         verify(_flush("test1", "test2").setIndicesOptions(options),true);
-        verify(gatewatSnapshot("test1", "test2").setIndicesOptions(options), true);
         verify(segments("test1", "test2").setIndicesOptions(options), true);
         verify(stats("test1", "test2").setIndicesOptions(options), true);
-        verify(status("test1", "test2").setIndicesOptions(options), true);
         verify(optimize("test1", "test2").setIndicesOptions(options), true);
         verify(refresh("test1", "test2").setIndicesOptions(options), true);
         verify(validateQuery("test1", "test2").setIndicesOptions(options), true);
@@ -125,16 +119,14 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
         verify(getWarmer("test1", "test2").setIndicesOptions(options), true);
         verify(getSettings("test1", "test2").setIndicesOptions(options), true);
 
-        options = IndicesOptions.lenient();
+        options = IndicesOptions.lenientExpandOpen();
         verify(search("test1", "test2").setIndicesOptions(options), false);
         verify(msearch(options, "test1", "test2").setIndicesOptions(options), false);
         verify(count("test1", "test2").setIndicesOptions(options), false);
         verify(clearCache("test1", "test2").setIndicesOptions(options), false);
         verify(_flush("test1", "test2").setIndicesOptions(options), false);
-        verify(gatewatSnapshot("test1", "test2").setIndicesOptions(options), false);
         verify(segments("test1", "test2").setIndicesOptions(options), false);
         verify(stats("test1", "test2").setIndicesOptions(options), false);
-        verify(status("test1", "test2").setIndicesOptions(options), false);
         verify(optimize("test1", "test2").setIndicesOptions(options), false);
         verify(refresh("test1", "test2").setIndicesOptions(options), false);
         verify(validateQuery("test1", "test2").setIndicesOptions(options), false);
@@ -150,7 +142,7 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
         verify(getWarmer("test1", "test2").setIndicesOptions(options), false);
         verify(getSettings("test1", "test2").setIndicesOptions(options), false);
 
-        options = IndicesOptions.strict();
+        options = IndicesOptions.strictExpandOpen();
         assertAcked(prepareCreate("test2"));
         ensureYellow();
         verify(search("test1", "test2").setIndicesOptions(options), false);
@@ -158,10 +150,8 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
         verify(count("test1", "test2").setIndicesOptions(options), false);
         verify(clearCache("test1", "test2").setIndicesOptions(options), false);
         verify(_flush("test1", "test2").setIndicesOptions(options),false);
-        verify(gatewatSnapshot("test1", "test2").setIndicesOptions(options), false);
         verify(segments("test1", "test2").setIndicesOptions(options), false);
         verify(stats("test1", "test2").setIndicesOptions(options), false);
-        verify(status("test1", "test2").setIndicesOptions(options), false);
         verify(optimize("test1", "test2").setIndicesOptions(options), false);
         verify(refresh("test1", "test2").setIndicesOptions(options), false);
         verify(validateQuery("test1", "test2").setIndicesOptions(options), false);
@@ -180,7 +170,7 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void testSpecifiedIndexUnavailable_snapshotRestore() throws Exception {
-        assertAcked(prepareCreate("test1"));
+        createIndex("test1");
         ensureYellow();
 
         PutRepositoryResponse putRepositoryResponse = client().admin().cluster().preparePutRepository("dummy-repo")
@@ -191,17 +181,19 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
         verify(snapshot("snap2", "test1", "test2"), true);
         verify(restore("snap1", "test1", "test2"), true);
 
-        IndicesOptions options = IndicesOptions.strict();
+        IndicesOptions options = IndicesOptions.strictExpandOpen();
         verify(snapshot("snap2", "test1", "test2").setIndicesOptions(options), true);
         verify(restore("snap1", "test1", "test2").setIndicesOptions(options), true);
 
-        options = IndicesOptions.lenient();
+        options = IndicesOptions.lenientExpandOpen();
         verify(snapshot("snap2", "test1", "test2").setIndicesOptions(options), false);
         verify(restore("snap2", "test1", "test2").setIndicesOptions(options), false);
 
-        options = IndicesOptions.strict();
+        options = IndicesOptions.strictExpandOpen();
         assertAcked(prepareCreate("test2"));
-        ensureYellow();
+        //TODO: temporary work-around for #5531
+        ensureGreen();
+        waitForRelocation();
         verify(snapshot("snap3", "test1", "test2").setIndicesOptions(options), false);
         verify(restore("snap3", "test1", "test2").setIndicesOptions(options), false);
     }
@@ -215,10 +207,8 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
         verify(count(indices), false);
         verify(clearCache(indices), false);
         verify(_flush(indices),false);
-        verify(gatewatSnapshot(indices), false);
         verify(segments(indices), true);
         verify(stats(indices), false);
-        verify(status(indices), false);
         verify(optimize(indices), false);
         verify(refresh(indices), false);
         verify(validateQuery(indices), true);
@@ -241,10 +231,8 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
         verify(count(indices).setIndicesOptions(options), false);
         verify(clearCache(indices).setIndicesOptions(options), false);
         verify(_flush(indices).setIndicesOptions(options),false);
-        verify(gatewatSnapshot(indices).setIndicesOptions(options), false);
         verify(segments(indices).setIndicesOptions(options), false);
         verify(stats(indices).setIndicesOptions(options), false);
-        verify(status(indices).setIndicesOptions(options), false);
         verify(optimize(indices).setIndicesOptions(options), false);
         verify(refresh(indices).setIndicesOptions(options), false);
         verify(validateQuery(indices).setIndicesOptions(options), false);
@@ -270,10 +258,8 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
         verify(count(indices), false, 1);
         verify(clearCache(indices), false);
         verify(_flush(indices),false);
-        verify(gatewatSnapshot(indices), false);
         verify(segments(indices), false);
         verify(stats(indices), false);
-        verify(status(indices), false);
         verify(optimize(indices), false);
         verify(refresh(indices), false);
         verify(validateQuery(indices), false);
@@ -296,10 +282,8 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
         verify(count(indices), false, 1);
         verify(clearCache(indices), false);
         verify(_flush(indices),false);
-        verify(gatewatSnapshot(indices), false);
         verify(segments(indices), true);
         verify(stats(indices), false);
-        verify(status(indices), false);
         verify(optimize(indices), false);
         verify(refresh(indices), false);
         verify(validateQuery(indices), true);
@@ -322,10 +306,8 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
         verify(count(indices).setIndicesOptions(options), false, 1);
         verify(clearCache(indices).setIndicesOptions(options), false);
         verify(_flush(indices).setIndicesOptions(options),false);
-        verify(gatewatSnapshot(indices).setIndicesOptions(options), false);
         verify(segments(indices).setIndicesOptions(options), false);
         verify(stats(indices).setIndicesOptions(options), false);
-        verify(status(indices).setIndicesOptions(options), false);
         verify(optimize(indices).setIndicesOptions(options), false);
         verify(refresh(indices).setIndicesOptions(options), false);
         verify(validateQuery(indices).setIndicesOptions(options), false);
@@ -344,7 +326,7 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void testWildcardBehaviour_snapshotRestore() throws Exception {
-        assertAcked(prepareCreate("foobar"));
+        createIndex("foobar");
         ensureYellow();
 
         PutRepositoryResponse putRepositoryResponse = client().admin().cluster().preparePutRepository("dummy-repo")
@@ -356,12 +338,14 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
         verify(snapshot("snap2", "foo*", "bar*").setIndicesOptions(options), true);
         verify(restore("snap1", "foo*", "bar*").setIndicesOptions(options), true);
 
-        options = IndicesOptions.strict();
+        options = IndicesOptions.strictExpandOpen();
         verify(snapshot("snap2", "foo*", "bar*").setIndicesOptions(options), false);
         verify(restore("snap2", "foo*", "bar*").setIndicesOptions(options), false);
 
         assertAcked(prepareCreate("barbaz"));
-        ensureYellow();
+        //TODO: temporary work-around for #5531
+        ensureGreen();
+        waitForRelocation();
         options = IndicesOptions.fromOptions(false, false, true, false);
         verify(snapshot("snap3", "foo*", "bar*").setIndicesOptions(options), false);
         verify(restore("snap3", "foo*", "bar*").setIndicesOptions(options), false);
@@ -373,22 +357,22 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void testAllMissing_lenient() throws Exception {
-        assertAcked(client().admin().indices().prepareCreate("test1"));
+        createIndex("test1");
         client().prepareIndex("test1", "type", "1").setSource("k", "v").setRefresh(true).execute().actionGet();
         SearchResponse response = client().prepareSearch("test2")
-                .setIndicesOptions(IndicesOptions.lenient())
+                .setIndicesOptions(IndicesOptions.lenientExpandOpen())
                 .setQuery(matchAllQuery())
                 .execute().actionGet();
         assertHitCount(response, 0l);
 
         response = client().prepareSearch("test2","test3").setQuery(matchAllQuery())
-                .setIndicesOptions(IndicesOptions.lenient())
+                .setIndicesOptions(IndicesOptions.lenientExpandOpen())
                 .execute().actionGet();
         assertHitCount(response, 0l);
         
         //you should still be able to run empty searches without things blowing up
         response  = client().prepareSearch()
-                .setIndicesOptions(IndicesOptions.lenient())
+                .setIndicesOptions(IndicesOptions.lenientExpandOpen())
                 .setQuery(matchAllQuery())
                 .execute().actionGet();
         assertHitCount(response, 1l);
@@ -396,7 +380,7 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void testAllMissing_strict() throws Exception {
-        assertAcked(client().admin().indices().prepareCreate("test1"));
+        createIndex("test1");
         ensureYellow();
         try {
             client().prepareSearch("test2")
@@ -421,8 +405,7 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
     @Test
     // For now don't handle closed indices
     public void testCloseApi_specifiedIndices() throws Exception {
-        assertAcked(prepareCreate("test1"));
-        assertAcked(prepareCreate("test2"));
+        createIndex("test1", "test2");
         ensureYellow();
         verify(search("test1", "test2"), false);
         verify(count("test1", "test2"), false);
@@ -448,10 +431,7 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void testCloseApi_wildcards() throws Exception {
-        assertAcked(prepareCreate("foo"));
-        assertAcked(prepareCreate("foobar"));
-        assertAcked(prepareCreate("bar"));
-        assertAcked(prepareCreate("barbaz"));
+        createIndex("foo", "foobar", "bar", "barbaz");
         ensureYellow();
 
         verify(client().admin().indices().prepareClose("bar*"), false);
@@ -468,7 +448,7 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void testDeleteIndex() throws Exception {
-        assertAcked(prepareCreate("foobar"));
+        createIndex("foobar");
         ensureYellow();
 
         verify(client().admin().indices().prepareDelete("foo"), true);
@@ -481,10 +461,7 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
     public void testDeleteIndex_wildcard() throws Exception {
         verify(client().admin().indices().prepareDelete("_all"), false);
 
-        assertAcked(prepareCreate("foo"));
-        assertAcked(prepareCreate("foobar"));
-        assertAcked(prepareCreate("bar"));
-        assertAcked(prepareCreate("barbaz"));
+        createIndex("foo", "foobar", "bar", "barbaz");
         ensureYellow();
 
         verify(client().admin().indices().prepareDelete("foo*"), false);
@@ -541,7 +518,7 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void testPutWarmer() throws Exception {
-        assertAcked(prepareCreate("foobar"));
+        createIndex("foobar");
         ensureYellow();
         verify(client().admin().indices().preparePutWarmer("warmer1").setSearchRequest(client().prepareSearch().setIndices("foobar").setQuery(QueryBuilders.matchAllQuery())), false);
         assertThat(client().admin().indices().prepareGetWarmers("foobar").setWarmers("warmer1").get().getWarmers().size(), equalTo(1));
@@ -550,11 +527,7 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
     
     @Test
     public void testPutWarmer_wildcard() throws Exception {
-        
-        assertAcked(prepareCreate("foo"));
-        assertAcked(prepareCreate("foobar"));
-        assertAcked(prepareCreate("bar"));
-        assertAcked(prepareCreate("barbaz"));
+        createIndex("foo", "foobar", "bar", "barbaz");
         ensureYellow();
 
         verify(client().admin().indices().preparePutWarmer("warmer1").setSearchRequest(client().prepareSearch().setIndices("foo*").setQuery(QueryBuilders.matchAllQuery())), false);
@@ -575,7 +548,7 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void testPutAlias() throws Exception {
-        assertAcked(prepareCreate("foobar"));
+        createIndex("foobar");
         ensureYellow();
         verify(client().admin().indices().prepareAliases().addAlias("foobar", "foobar_alias"), false);
         assertThat(client().admin().indices().prepareAliasesExist("foobar_alias").setIndices("foobar").get().exists(), equalTo(true));
@@ -584,11 +557,7 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
     
     @Test
     public void testPutAlias_wildcard() throws Exception {
-        
-        assertAcked(prepareCreate("foo"));
-        assertAcked(prepareCreate("foobar"));
-        assertAcked(prepareCreate("bar"));
-        assertAcked(prepareCreate("barbaz"));
+        createIndex("foo", "foobar", "bar", "barbaz");
         ensureYellow();
 
         verify(client().admin().indices().prepareAliases().addAlias("foo*", "foobar_alias"), false);
@@ -681,15 +650,12 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
     // Indices exists never throws IndexMissingException, the indices options control its behaviour (return true or false)
     public void testIndicesExists() throws Exception {
         assertThat(client().admin().indices().prepareExists("foo").get().isExists(), equalTo(false));
-        assertThat(client().admin().indices().prepareExists("foo").setIndicesOptions(IndicesOptions.lenient()).get().isExists(), equalTo(true));
+        assertThat(client().admin().indices().prepareExists("foo").setIndicesOptions(IndicesOptions.lenientExpandOpen()).get().isExists(), equalTo(true));
         assertThat(client().admin().indices().prepareExists("foo*").get().isExists(), equalTo(false));
         assertThat(client().admin().indices().prepareExists("foo*").setIndicesOptions(IndicesOptions.fromOptions(false, true, true, false)).get().isExists(), equalTo(true));
         assertThat(client().admin().indices().prepareExists("_all").get().isExists(), equalTo(false));
 
-        assertAcked(prepareCreate("foo"));
-        assertAcked(prepareCreate("foobar"));
-        assertAcked(prepareCreate("bar"));
-        assertAcked(prepareCreate("barbaz"));
+        createIndex("foo", "foobar", "bar", "barbaz");
         ensureYellow();
 
         assertThat(client().admin().indices().prepareExists("foo*").get().isExists(), equalTo(true));
@@ -704,10 +670,7 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
         verify(client().admin().indices().preparePutMapping("foo").setType("type1").setSource("field", "type=string"), true);
         verify(client().admin().indices().preparePutMapping("_all").setType("type1").setSource("field", "type=string"), true);
 
-        assertAcked(prepareCreate("foo"));
-        assertAcked(prepareCreate("foobar"));
-        assertAcked(prepareCreate("bar"));
-        assertAcked(prepareCreate("barbaz"));
+        createIndex("foo", "foobar", "bar", "barbaz");
         ensureYellow();
 
         verify(client().admin().indices().preparePutMapping("foo").setType("type1").setSource("field", "type=string"), false);
@@ -739,10 +702,7 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
         verify(client().admin().indices().prepareUpdateSettings("foo").setSettings(ImmutableSettings.builder().put("a", "b")), true);
         verify(client().admin().indices().prepareUpdateSettings("_all").setSettings(ImmutableSettings.builder().put("a", "b")), true);
 
-        assertAcked(prepareCreate("foo"));
-        assertAcked(prepareCreate("foobar"));
-        assertAcked(prepareCreate("bar"));
-        assertAcked(prepareCreate("barbaz"));
+        createIndex("foo", "foobar", "bar", "barbaz");
         ensureYellow();
         assertAcked(client().admin().indices().prepareClose("_all").get());
 
@@ -794,20 +754,12 @@ public class IndicesOptionsTests extends ElasticsearchIntegrationTest {
         return client().admin().indices().prepareFlush(indices);
     }
 
-    private static GatewaySnapshotRequestBuilder gatewatSnapshot(String... indices) {
-        return client().admin().indices().prepareGatewaySnapshot(indices);
-    }
-
     private static IndicesSegmentsRequestBuilder segments(String... indices) {
         return client().admin().indices().prepareSegments(indices);
     }
 
     private static IndicesStatsRequestBuilder stats(String... indices) {
         return client().admin().indices().prepareStats(indices);
-    }
-
-    private static IndicesStatusRequestBuilder status(String... indices) {
-        return client().admin().indices().prepareStatus(indices);
     }
 
     private static OptimizeRequestBuilder optimize(String... indices) {

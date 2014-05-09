@@ -20,6 +20,7 @@
 package org.elasticsearch.index.query;
 
 import org.apache.lucene.search.Filter;
+import org.elasticsearch.action.support.IndicesOptions;
 import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.inject.Inject;
@@ -90,7 +91,7 @@ public class IndicesFilterParser implements FilterParser {
                         throw  new QueryParsingException(parseContext.index(), "[indices] indices or index already specified");
                     }
                     indicesFound = true;
-                    Collection<String> indices = new ArrayList<String>();
+                    Collection<String> indices = new ArrayList<>();
                     while (parser.nextToken() != XContentParser.Token.END_ARRAY) {
                         String value = parser.textOrNull();
                         if (value == null) {
@@ -145,7 +146,7 @@ public class IndicesFilterParser implements FilterParser {
     }
 
     protected boolean matchesIndices(String currentIndex, String... indices) {
-        final String[] concreteIndices = clusterService.state().metaData().concreteIndicesIgnoreMissing(indices);
+        final String[] concreteIndices = clusterService.state().metaData().concreteIndices(indices, IndicesOptions.lenientExpandOpen());
         for (String index : concreteIndices) {
             if (Regex.simpleMatch(index, currentIndex)) {
                 return true;

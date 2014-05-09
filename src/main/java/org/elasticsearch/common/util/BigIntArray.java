@@ -19,9 +19,9 @@
 
 package org.elasticsearch.common.util;
 
+import com.google.common.base.Preconditions;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.RamUsageEstimator;
-import org.elasticsearch.cache.recycler.PageCacheRecycler;
 
 import java.util.Arrays;
 
@@ -36,8 +36,8 @@ final class BigIntArray extends AbstractBigArray implements IntArray {
     private int[][] pages;
 
     /** Constructor. */
-    public BigIntArray(long size, PageCacheRecycler recycler, boolean clearOnResize) {
-        super(INT_PAGE_SIZE, recycler, clearOnResize);
+    public BigIntArray(long size, BigArrays bigArrays, boolean clearOnResize) {
+        super(INT_PAGE_SIZE, bigArrays, clearOnResize);
         this.size = size;
         pages = new int[numPages(size)][];
         for (int i = 0; i < pages.length; ++i) {
@@ -67,6 +67,22 @@ final class BigIntArray extends AbstractBigArray implements IntArray {
         final int pageIndex = pageIndex(index);
         final int indexInPage = indexInPage(index);
         return pages[pageIndex][indexInPage] += inc;
+    }
+
+    @Override
+    public void fill(long fromIndex, long toIndex, int value) {
+        Preconditions.checkArgument(fromIndex <= toIndex);
+        final int fromPage = pageIndex(fromIndex);
+        final int toPage = pageIndex(toIndex - 1);
+        if (fromPage == toPage) {
+            Arrays.fill(pages[fromPage], indexInPage(fromIndex), indexInPage(toIndex - 1) + 1, value);
+        } else {
+            Arrays.fill(pages[fromPage], indexInPage(fromIndex), pages[fromPage].length, value);
+            for (int i = fromPage + 1; i < toPage; ++i) {
+                Arrays.fill(pages[i], value);
+            }
+            Arrays.fill(pages[toPage], 0, indexInPage(toIndex - 1) + 1, value);
+        }
     }
 
     @Override

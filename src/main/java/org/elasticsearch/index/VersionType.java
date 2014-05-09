@@ -26,15 +26,30 @@ import org.elasticsearch.common.lucene.uid.Versions;
  */
 public enum VersionType {
     INTERNAL((byte) 0) {
-        /**
-         * - always returns false if currentVersion == {@link Versions#NOT_SET}
-         * - always accepts expectedVersion == {@link Versions#MATCH_ANY}
-         * - if expectedVersion is set, always conflict if currentVersion == {@link Versions#NOT_FOUND}
-         */
         @Override
-        public boolean isVersionConflict(long currentVersion, long expectedVersion) {
-            return currentVersion != Versions.NOT_SET && expectedVersion != Versions.MATCH_ANY
-                    && (currentVersion == Versions.NOT_FOUND || currentVersion != expectedVersion);
+        public boolean isVersionConflictForWrites(long currentVersion, long expectedVersion) {
+            return isVersionConflict(currentVersion, expectedVersion);
+        }
+
+        @Override
+        public boolean isVersionConflictForReads(long currentVersion, long expectedVersion) {
+            return isVersionConflict(currentVersion, expectedVersion);
+        }
+
+        private boolean isVersionConflict(long currentVersion, long expectedVersion) {
+            if (currentVersion == Versions.NOT_SET) {
+                return false;
+            }
+            if (expectedVersion == Versions.MATCH_ANY) {
+                return false;
+            }
+            if (currentVersion == Versions.NOT_FOUND) {
+                return true;
+            }
+            if (currentVersion != expectedVersion) {
+                return true;
+            }
+            return false;
         }
 
         @Override
@@ -42,23 +57,165 @@ public enum VersionType {
             return (currentVersion == Versions.NOT_SET || currentVersion == Versions.NOT_FOUND) ? 1 : currentVersion + 1;
         }
 
+        @Override
+        public boolean validateVersionForWrites(long version) {
+            // not allowing Versions.NOT_FOUND as it is not a valid input value.
+            return version > 0L || version == Versions.MATCH_ANY;
+        }
+
+        @Override
+        public boolean validateVersionForReads(long version) {
+            // not allowing Versions.NOT_FOUND as it is not a valid input value.
+            return version > 0L || version == Versions.MATCH_ANY;
+        }
+
+        @Override
+        public VersionType versionTypeForReplicationAndRecovery() {
+            // replicas get the version from the primary after increment. The same version is stored in
+            // the transaction log. -> the should use the external semantics.
+            return EXTERNAL;
+        }
     },
     EXTERNAL((byte) 1) {
-        /**
-         * - always returns false if currentVersion == {@link Versions#NOT_SET}
-         * - always conflict if expectedVersion == {@link Versions#MATCH_ANY} (we need something to set)
-         * - accepts currentVersion == {@link Versions#NOT_FOUND}
-         */
         @Override
-        public boolean isVersionConflict(long currentVersion, long expectedVersion) {
-            return currentVersion != Versions.NOT_SET && currentVersion != Versions.NOT_FOUND
-                    && (expectedVersion == Versions.MATCH_ANY || currentVersion >= expectedVersion);
+        public boolean isVersionConflictForWrites(long currentVersion, long expectedVersion) {
+            if (currentVersion == Versions.NOT_SET) {
+                return false;
+            }
+            if (currentVersion == Versions.NOT_FOUND) {
+                return false;
+            }
+            if (expectedVersion == Versions.MATCH_ANY) {
+                return true;
+            }
+            if (currentVersion >= expectedVersion) {
+                return true;
+            }
+            return false;
+        }
+
+        @Override
+        public boolean isVersionConflictForReads(long currentVersion, long expectedVersion) {
+            if (currentVersion == Versions.NOT_SET) {
+                return false;
+            }
+            if (expectedVersion == Versions.MATCH_ANY) {
+                return false;
+            }
+            if (currentVersion == Versions.NOT_FOUND) {
+                return true;
+            }
+            if (currentVersion != expectedVersion) {
+                return true;
+            }
+            return false;
         }
 
         @Override
         public long updateVersion(long currentVersion, long expectedVersion) {
             return expectedVersion;
         }
+
+        @Override
+        public boolean validateVersionForWrites(long version) {
+            return version > 0L;
+        }
+
+        @Override
+        public boolean validateVersionForReads(long version) {
+            return version > 0L || version == Versions.MATCH_ANY;
+        }
+
+    },
+    EXTERNAL_GTE((byte) 2) {
+        @Override
+        public boolean isVersionConflictForWrites(long currentVersion, long expectedVersion) {
+            if (currentVersion == Versions.NOT_SET) {
+                return false;
+            }
+            if (currentVersion == Versions.NOT_FOUND) {
+                return false;
+            }
+            if (expectedVersion == Versions.MATCH_ANY) {
+                return true;
+            }
+            if (currentVersion > expectedVersion) {
+                return true;
+            }
+            return false;
+        }
+
+        @Override
+        public boolean isVersionConflictForReads(long currentVersion, long expectedVersion) {
+            if (currentVersion == Versions.NOT_SET) {
+                return false;
+            }
+            if (expectedVersion == Versions.MATCH_ANY) {
+                return false;
+            }
+            if (currentVersion == Versions.NOT_FOUND) {
+                return true;
+            }
+            if (currentVersion != expectedVersion) {
+                return true;
+            }
+            return false;
+        }
+
+        @Override
+        public long updateVersion(long currentVersion, long expectedVersion) {
+            return expectedVersion;
+        }
+
+        @Override
+        public boolean validateVersionForWrites(long version) {
+            return version > 0L;
+        }
+
+        @Override
+        public boolean validateVersionForReads(long version) {
+            return version > 0L || version == Versions.MATCH_ANY;
+        }
+
+    },
+    /**
+     * Warning: this version type should be used with care. Concurrent indexing may result in loss of data on replicas
+     */
+    FORCE((byte) 3) {
+        @Override
+        public boolean isVersionConflictForWrites(long currentVersion, long expectedVersion) {
+            if (currentVersion == Versions.NOT_SET) {
+                return false;
+            }
+            if (currentVersion == Versions.NOT_FOUND) {
+                return false;
+            }
+            if (expectedVersion == Versions.MATCH_ANY) {
+                return true;
+            }
+            return false;
+        }
+
+        @Override
+        public boolean isVersionConflictForReads(long currentVersion, long expectedVersion) {
+            return false;
+        }
+
+        @Override
+        public long updateVersion(long currentVersion, long expectedVersion) {
+            return expectedVersion;
+        }
+
+        @Override
+        public boolean validateVersionForWrites(long version) {
+            return version > 0L;
+        }
+
+        @Override
+        public boolean validateVersionForReads(long version) {
+            return version > 0L || version == Versions.MATCH_ANY;
+        }
+
     };
 
     private final byte value;
@@ -76,7 +233,14 @@ public enum VersionType {
      *
      * @return true if versions conflict false o.w.
      */
-    public abstract boolean isVersionConflict(long currentVersion, long expectedVersion);
+    public abstract boolean isVersionConflictForWrites(long currentVersion, long expectedVersion);
+
+    /**
+     * Checks whether the current version conflicts with the expected version, based on the current version type.
+     *
+     * @return true if versions conflict false o.w.
+     */
+    public abstract boolean isVersionConflictForReads(long currentVersion, long expectedVersion);
 
     /**
      * Returns the new version for a document, based on its current one and the specified in the request
@@ -85,11 +249,39 @@ public enum VersionType {
      */
     public abstract long updateVersion(long currentVersion, long expectedVersion);
 
+    /**
+     * validate the version is a valid value for this type when writing.
+     *
+     * @return true if valid, false o.w
+     */
+    public abstract boolean validateVersionForWrites(long version);
+
+    /**
+     * validate the version is a valid value for this type when reading.
+     *
+     * @return true if valid, false o.w
+     */
+    public abstract boolean validateVersionForReads(long version);
+
+    /**
+     * Some version types require different semantics for primary and replicas. This version allows
+     * the type to override the default behavior.
+     */
+    public VersionType versionTypeForReplicationAndRecovery() {
+        return this;
+    }
+
     public static VersionType fromString(String versionType) {
         if ("internal".equals(versionType)) {
             return INTERNAL;
         } else if ("external".equals(versionType)) {
             return EXTERNAL;
+        } else if ("external_gt".equals(versionType)) {
+            return EXTERNAL;
+        } else if ("external_gte".equals(versionType)) {
+            return EXTERNAL_GTE;
+        } else if ("force".equals(versionType)) {
+            return FORCE;
         }
         throw new ElasticsearchIllegalArgumentException("No version type match [" + versionType + "]");
     }
@@ -98,12 +290,7 @@ public enum VersionType {
         if (versionType == null) {
             return defaultVersionType;
         }
-        if ("internal".equals(versionType)) {
-            return INTERNAL;
-        } else if ("external".equals(versionType)) {
-            return EXTERNAL;
-        }
-        throw new ElasticsearchIllegalArgumentException("No version type match [" + versionType + "]");
+        return fromString(versionType);
     }
 
     public static VersionType fromValue(byte value) {
@@ -111,6 +298,10 @@ public enum VersionType {
             return INTERNAL;
         } else if (value == 1) {
             return EXTERNAL;
+        } else if (value == 2) {
+            return EXTERNAL_GTE;
+        } else if (value == 3) {
+            return FORCE;
         }
         throw new ElasticsearchIllegalArgumentException("No version type match [" + value + "]");
     }

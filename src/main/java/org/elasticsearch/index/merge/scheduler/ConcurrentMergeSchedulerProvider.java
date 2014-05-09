@@ -20,6 +20,7 @@
 package org.elasticsearch.index.merge.scheduler;
 
 import com.google.common.collect.ImmutableSet;
+import org.apache.lucene.index.ConcurrentMergeScheduler;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.MergePolicy;
 import org.apache.lucene.index.MergeScheduler;
@@ -46,20 +47,19 @@ public class ConcurrentMergeSchedulerProvider extends MergeSchedulerProvider {
     private final int maxThreadCount;
     private final int maxMergeCount;
 
-    private Set<CustomConcurrentMergeScheduler> schedulers = new CopyOnWriteArraySet<CustomConcurrentMergeScheduler>();
+    private Set<CustomConcurrentMergeScheduler> schedulers = new CopyOnWriteArraySet<>();
 
     @Inject
     public ConcurrentMergeSchedulerProvider(ShardId shardId, @IndexSettings Settings indexSettings, ThreadPool threadPool) {
         super(shardId, indexSettings, threadPool);
 
-        // TODO LUCENE MONITOR this will change in Lucene 4.0
-        this.maxThreadCount = componentSettings.getAsInt("max_thread_count", Math.max(1, Math.min(3, Runtime.getRuntime().availableProcessors() / 2)));
-        this.maxMergeCount = componentSettings.getAsInt("max_merge_count", maxThreadCount + 2);
+        this.maxThreadCount = componentSettings.getAsInt("max_thread_count", ConcurrentMergeScheduler.DEFAULT_MAX_THREAD_COUNT);
+        this.maxMergeCount = componentSettings.getAsInt("max_merge_count", ConcurrentMergeScheduler.DEFAULT_MAX_MERGE_COUNT);
         logger.debug("using [concurrent] merge scheduler with max_thread_count[{}]", maxThreadCount);
     }
 
     @Override
-    public MergeScheduler newMergeScheduler() {
+    public MergeScheduler buildMergeScheduler() {
         CustomConcurrentMergeScheduler concurrentMergeScheduler = new CustomConcurrentMergeScheduler(logger, shardId, this);
         concurrentMergeScheduler.setMaxMergesAndThreads(maxMergeCount, maxThreadCount);
         schedulers.add(concurrentMergeScheduler);

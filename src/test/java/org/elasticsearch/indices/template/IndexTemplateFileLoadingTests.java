@@ -27,21 +27,18 @@ import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
 import org.elasticsearch.test.ElasticsearchIntegrationTest.ClusterScope;
-import org.elasticsearch.test.ElasticsearchIntegrationTest.Scope;
 import org.junit.Test;
 
 import java.io.File;
 import java.util.HashSet;
 import java.util.Set;
 
+import static org.elasticsearch.test.ElasticsearchIntegrationTest.*;
+import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
 
-/**
- *
- */
-@ClusterScope(scope=Scope.TEST, numNodes=1)
+@ClusterScope(scope= Scope.TEST, numDataNodes =1)
 public class IndexTemplateFileLoadingTests extends ElasticsearchIntegrationTest {
-
 
     @Override
     protected Settings nodeSettings(int nodeOrdinal) {
@@ -68,10 +65,22 @@ public class IndexTemplateFileLoadingTests extends ElasticsearchIntegrationTest 
         return settingsBuilder.build();
     }
 
+    @Override
+    protected int numberOfShards() {
+        //number of shards won't be set through index settings, the one from the index templates needs to be used
+        return -1;
+    }
+
+    @Override
+    protected int numberOfReplicas() {
+        //number of replicas won't be set through index settings, the one from the index templates needs to be used
+        return -1;
+    }
+
     @Test
     public void testThatLoadingTemplateFromFileWorks() throws Exception {
-        final int iters = atLeast(5);
-        Set<String> indices = new HashSet<String>();
+        final int iters = scaledRandomIntBetween(5, 20);
+        Set<String> indices = new HashSet<>();
         for (int i = 0; i < iters; i++) {
             String indexName = "foo" + randomRealisticUnicodeOfLengthBetween(0, 5);
             if (indices.contains(indexName)) {
@@ -84,6 +93,9 @@ public class IndexTemplateFileLoadingTests extends ElasticsearchIntegrationTest 
             ClusterStateResponse stateResponse = client().admin().cluster().prepareState().setIndices(indexName).get();
             assertThat(stateResponse.getState().getMetaData().indices().get(indexName).getNumberOfShards(), is(10));
             assertThat(stateResponse.getState().getMetaData().indices().get(indexName).getNumberOfReplicas(), is(0));
+            assertThat(stateResponse.getState().getMetaData().indices().get(indexName).aliases().size(), equalTo(1));
+            String aliasName = indexName + "-alias";
+            assertThat(stateResponse.getState().getMetaData().indices().get(indexName).aliases().get(aliasName).alias(), equalTo(aliasName));
         }
     }
 }

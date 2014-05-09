@@ -21,6 +21,7 @@ package org.elasticsearch.action.percolate;
 
 import com.google.common.collect.Lists;
 import org.elasticsearch.ElasticsearchGenerationException;
+import org.elasticsearch.client.Requests;
 import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.xcontent.*;
@@ -245,7 +246,7 @@ public class PercolateSourceBuilder implements ToXContent {
         }
 
         public DocBuilder setDoc(String field, Object value) {
-            Map<String, Object> values = new HashMap<String, Object>(2);
+            Map<String, Object> values = new HashMap<>(2);
             values.put(field, value);
             setDoc(values);
             return this;
@@ -262,7 +263,7 @@ public class PercolateSourceBuilder implements ToXContent {
         }
 
         public DocBuilder setDoc(Map doc) {
-            return setDoc(doc, PercolateRequest.contentType);
+            return setDoc(doc, Requests.CONTENT_TYPE);
         }
 
         public DocBuilder setDoc(Map doc, XContentType contentType) {
@@ -279,13 +280,10 @@ public class PercolateSourceBuilder implements ToXContent {
             if (contentType == builder.contentType()) {
                 builder.rawField("doc", doc);
             } else {
-                XContentParser parser = XContentFactory.xContent(contentType).createParser(doc);
-                try {
+                try (XContentParser parser = XContentFactory.xContent(contentType).createParser(doc)) {
                     parser.nextToken();
                     builder.field("doc");
                     builder.copyCurrentStructure(parser);
-                } finally {
-                    parser.close();
                 }
             }
             return builder;

@@ -19,22 +19,21 @@
 package org.elasticsearch.search.aggregations.metrics.max;
 
 import org.elasticsearch.search.aggregations.AggregatorFactory;
-import org.elasticsearch.search.aggregations.metrics.ValuesSourceMetricsAggregatorParser;
+import org.elasticsearch.search.aggregations.metrics.NumericValuesSourceMetricsAggregatorParser;
+import org.elasticsearch.search.aggregations.support.ValuesSource;
 import org.elasticsearch.search.aggregations.support.ValuesSourceConfig;
-import org.elasticsearch.search.aggregations.support.numeric.NumericValuesSource;
 
 /**
  *
  */
-public class MaxParser extends ValuesSourceMetricsAggregatorParser<InternalMax> {
+public class MaxParser extends NumericValuesSourceMetricsAggregatorParser<InternalMax> {
 
-    @Override
-    public String type() {
-        return InternalMax.TYPE.name();
+    public MaxParser() {
+        super(InternalMax.TYPE);
     }
 
     @Override
-    protected AggregatorFactory createFactory(String aggregationName, ValuesSourceConfig<NumericValuesSource> config) {
+    protected AggregatorFactory createFactory(String aggregationName, ValuesSourceConfig<ValuesSource.Numeric> config) {
         return new MaxAggregator.Factory(aggregationName, config);
     }
 

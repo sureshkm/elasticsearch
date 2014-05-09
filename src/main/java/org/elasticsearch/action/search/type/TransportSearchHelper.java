@@ -47,8 +47,8 @@ import java.util.Map;
  */
 public abstract class TransportSearchHelper {
 
-    public static ShardSearchRequest internalSearchRequest(ShardRouting shardRouting, int numberOfShards, SearchRequest request, String[] filteringAliases, long nowInMillis) {
-        ShardSearchRequest shardRequest = new ShardSearchRequest(request, shardRouting, numberOfShards);
+    public static ShardSearchRequest internalSearchRequest(ShardRouting shardRouting, int numberOfShards, SearchRequest request, String[] filteringAliases, long nowInMillis, boolean useSlowScroll) {
+        ShardSearchRequest shardRequest = new ShardSearchRequest(request, shardRouting, numberOfShards, useSlowScroll);
         shardRequest.filteringAliases(filteringAliases);
         shardRequest.nowInMillis(nowInMillis);
         return shardRequest;
@@ -96,13 +96,21 @@ public abstract class TransportSearchHelper {
         try {
             byte[] decode = Base64.decode(scrollId, Base64.URL_SAFE);
             UnicodeUtil.UTF8toUTF16(decode, 0, decode.length, spare);
-        } catch (IOException e) {
+        } catch (Exception e) {
             throw new ElasticsearchIllegalArgumentException("Failed to decode scrollId", e);
         }
         String[] elements = Strings.splitStringToArray(spare, ';');
+        if (elements.length < 2) {
+            throw new ElasticsearchIllegalArgumentException("Malformed scrollId [" + scrollId + "]");
+        }
+
         int index = 0;
         String type = elements[index++];
         int contextSize = Integer.parseInt(elements[index++]);
+        if (elements.length < contextSize + 2) {
+            throw new ElasticsearchIllegalArgumentException("Malformed scrollId [" + scrollId + "]");
+        }
+
         @SuppressWarnings({"unchecked"}) Tuple<String, Long>[] context = new Tuple[contextSize];
         for (int i = 0; i < contextSize; i++) {
             String element = elements[index++];
@@ -110,7 +118,7 @@ public abstract class TransportSearchHelper {
             if (sep == -1) {
                 throw new ElasticsearchIllegalArgumentException("Malformed scrollId [" + scrollId + "]");
             }
-            context[i] = new Tuple<String, Long>(element.substring(sep + 1), Long.parseLong(element.substring(0, sep)));
+            context[i] = new Tuple<>(element.substring(sep + 1), Long.parseLong(element.substring(0, sep)));
         }
         Map<String, String> attributes;
         int attributesSize = Integer.parseInt(elements[index++]);

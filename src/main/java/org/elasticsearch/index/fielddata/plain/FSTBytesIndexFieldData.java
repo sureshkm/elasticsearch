@@ -30,9 +30,11 @@ import org.elasticsearch.index.Index;
 import org.elasticsearch.index.fielddata.FieldDataType;
 import org.elasticsearch.index.fielddata.IndexFieldData;
 import org.elasticsearch.index.fielddata.IndexFieldDataCache;
+import org.elasticsearch.index.fielddata.ordinals.GlobalOrdinalsBuilder;
 import org.elasticsearch.index.fielddata.ordinals.Ordinals;
 import org.elasticsearch.index.fielddata.ordinals.OrdinalsBuilder;
 import org.elasticsearch.index.mapper.FieldMapper;
+import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.settings.IndexSettings;
 import org.elasticsearch.indices.fielddata.breaker.CircuitBreakerService;
 
@@ -46,14 +48,15 @@ public class FSTBytesIndexFieldData extends AbstractBytesIndexFieldData<FSTBytes
 
         @Override
         public IndexFieldData<FSTBytesAtomicFieldData> build(Index index, @IndexSettings Settings indexSettings, FieldMapper<?> mapper,
-                                                             IndexFieldDataCache cache, CircuitBreakerService breakerService) {
-            return new FSTBytesIndexFieldData(index, indexSettings, mapper.names(), mapper.fieldDataType(), cache, breakerService);
+                                                             IndexFieldDataCache cache, CircuitBreakerService breakerService, MapperService mapperService,
+                                                             GlobalOrdinalsBuilder globalOrdinalBuilder) {
+            return new FSTBytesIndexFieldData(index, indexSettings, mapper.names(), mapper.fieldDataType(), cache, breakerService, globalOrdinalBuilder);
         }
     }
 
     FSTBytesIndexFieldData(Index index, @IndexSettings Settings indexSettings, FieldMapper.Names fieldNames, FieldDataType fieldDataType,
-                           IndexFieldDataCache cache, CircuitBreakerService breakerService) {
-        super(index, indexSettings, fieldNames, fieldDataType, cache);
+                           IndexFieldDataCache cache, CircuitBreakerService breakerService, GlobalOrdinalsBuilder globalOrdinalsBuilder) {
+        super(index, indexSettings, fieldNames, fieldDataType, cache, globalOrdinalsBuilder, breakerService);
         this.breakerService = breakerService;
     }
 
@@ -66,12 +69,12 @@ public class FSTBytesIndexFieldData extends AbstractBytesIndexFieldData<FSTBytes
         // TODO: Use an actual estimator to estimate before loading.
         NonEstimatingEstimator estimator = new NonEstimatingEstimator(breakerService.getBreaker());
         if (terms == null) {
-            data = FSTBytesAtomicFieldData.empty(reader.maxDoc());
+            data = FSTBytesAtomicFieldData.empty();
             estimator.afterLoad(null, data.getMemorySizeInBytes());
             return data;
         }
         PositiveIntOutputs outputs = PositiveIntOutputs.getSingleton();
-        org.apache.lucene.util.fst.Builder<Long> fstBuilder = new org.apache.lucene.util.fst.Builder<Long>(INPUT_TYPE.BYTE1, outputs);
+        org.apache.lucene.util.fst.Builder<Long> fstBuilder = new org.apache.lucene.util.fst.Builder<>(INPUT_TYPE.BYTE1, outputs);
         final IntsRef scratch = new IntsRef();
 
         final long numTerms;
@@ -81,24 +84,22 @@ public class FSTBytesIndexFieldData extends AbstractBytesIndexFieldData<FSTBytes
             numTerms = -1;
         }
         final float acceptableTransientOverheadRatio = fieldDataType.getSettings().getAsFloat("acceptable_transient_overhead_ratio", OrdinalsBuilder.DEFAULT_ACCEPTABLE_OVERHEAD_RATIO);
-        OrdinalsBuilder builder = new OrdinalsBuilder(numTerms, reader.maxDoc(), acceptableTransientOverheadRatio);
         boolean success = false;
-        try {
-            
+        try (OrdinalsBuilder builder = new OrdinalsBuilder(numTerms, reader.maxDoc(), acceptableTransientOverheadRatio)) {
+
             // we don't store an ord 0 in the FST since we could have an empty string in there and FST don't support
             // empty strings twice. ie. them merge fails for long output.
             TermsEnum termsEnum = filter(terms, reader);
             DocsEnum docsEnum = null;
             for (BytesRef term = termsEnum.next(); term != null; term = termsEnum.next()) {
                 final long termOrd = builder.nextOrdinal();
-                assert termOrd > 0;
-                fstBuilder.add(Util.toIntsRef(term, scratch), (long)termOrd);
+                fstBuilder.add(Util.toIntsRef(term, scratch), (long) termOrd);
                 docsEnum = termsEnum.docs(null, docsEnum, DocsEnum.FLAG_NONE);
                 for (int docId = docsEnum.nextDoc(); docId != DocsEnum.NO_MORE_DOCS; docId = docsEnum.nextDoc()) {
                     builder.addDoc(docId);
                 }
             }
-            
+
             FST<Long> fst = fstBuilder.finish();
 
             final Ordinals ordinals = builder.build(fieldDataType.getSettings());
@@ -110,7 +111,7 @@ public class FSTBytesIndexFieldData extends AbstractBytesIndexFieldData<FSTBytes
             if (success) {
                 estimator.afterLoad(null, data.getMemorySizeInBytes());
             }
-            builder.close();
+
         }
     }
 }

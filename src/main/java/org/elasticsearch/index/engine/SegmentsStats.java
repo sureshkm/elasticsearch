@@ -50,8 +50,7 @@ public class SegmentsStats implements Streamable, ToXContent {
         if (mergeStats == null) {
             return;
         }
-        this.count += mergeStats.count;
-        this.memoryInBytes += mergeStats.memoryInBytes;
+        add(mergeStats.count, mergeStats.memoryInBytes);
     }
 
     /**

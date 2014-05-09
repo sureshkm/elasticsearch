@@ -26,8 +26,10 @@ import org.elasticsearch.client.Requests;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.settings.SettingsFilter;
+import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.rest.*;
+import org.elasticsearch.rest.action.support.AcknowledgedRestListener;
 
 import java.io.IOException;
 
@@ -46,26 +48,18 @@ public class RestClusterRerouteAction extends BaseRestHandler {
     }
 
     @Override
-    public void handleRequest(final RestRequest request, final RestChannel channel) {
+    public void handleRequest(final RestRequest request, final RestChannel channel) throws Exception {
         final ClusterRerouteRequest clusterRerouteRequest = Requests.clusterRerouteRequest();
         clusterRerouteRequest.listenerThreaded(false);
         clusterRerouteRequest.dryRun(request.paramAsBoolean("dry_run", clusterRerouteRequest.dryRun()));
+        clusterRerouteRequest.explain(request.paramAsBoolean("explain", clusterRerouteRequest.explain()));
         clusterRerouteRequest.timeout(request.paramAsTime("timeout", clusterRerouteRequest.timeout()));
         clusterRerouteRequest.masterNodeTimeout(request.paramAsTime("master_timeout", clusterRerouteRequest.masterNodeTimeout()));
         if (request.hasContent()) {
-            try {
-                clusterRerouteRequest.source(request.content());
-            } catch (Exception e) {
-                try {
-                    channel.sendResponse(new XContentThrowableRestResponse(request, e));
-                } catch (IOException e1) {
-                    logger.warn("Failed to send response", e1);
-                }
-                return;
-            }
+            clusterRerouteRequest.source(request.content());
         }
 
-        client.admin().cluster().reroute(clusterRerouteRequest, new AcknowledgedRestResponseActionListener<ClusterRerouteResponse>(request, channel, logger) {
+        client.admin().cluster().reroute(clusterRerouteRequest, new AcknowledgedRestListener<ClusterRerouteResponse>(channel) {
             @Override
             protected void addCustomFields(XContentBuilder builder, ClusterRerouteResponse response) throws IOException {
                 builder.startObject("state");
@@ -75,14 +69,10 @@ public class RestClusterRerouteAction extends BaseRestHandler {
                 }
                 response.getState().settingsFilter(settingsFilter).toXContent(builder, request);
                 builder.endObject();
-            }
-
-            @Override
-            public void onFailure(Throwable e) {
-                if (logger.isDebugEnabled()) {
-                    logger.debug("failed to handle cluster reroute", e);
+                if (clusterRerouteRequest.explain()) {
+                    assert response.getExplanations() != null;
+                    response.getExplanations().toXContent(builder, ToXContent.EMPTY_PARAMS);
                 }
-                super.onFailure(e);
             }
         });
     }

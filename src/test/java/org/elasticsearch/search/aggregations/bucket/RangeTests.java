@@ -20,8 +20,6 @@ package org.elasticsearch.search.aggregations.bucket;
 
 import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.action.search.SearchResponse;
-import org.elasticsearch.common.settings.ImmutableSettings;
-import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.search.aggregations.bucket.histogram.Histogram;
 import org.elasticsearch.search.aggregations.bucket.range.Range;
 import org.elasticsearch.search.aggregations.bucket.terms.Terms;
@@ -29,7 +27,6 @@ import org.elasticsearch.search.aggregations.metrics.avg.Avg;
 import org.elasticsearch.search.aggregations.metrics.sum.Sum;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
 import org.hamcrest.Matchers;
-import org.junit.Before;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -46,35 +43,35 @@ import static org.hamcrest.core.IsNull.notNullValue;
 /**
  *
  */
+@ElasticsearchIntegrationTest.SuiteScopeTest
 public class RangeTests extends ElasticsearchIntegrationTest {
 
     private static final String SINGLE_VALUED_FIELD_NAME = "l_value";
     private static final String MULTI_VALUED_FIELD_NAME = "l_values";
 
+    static int numDocs;
+
     @Override
-    public Settings indexSettings() {
-        return ImmutableSettings.builder()
-                .put("index.number_of_shards", between(1, 5))
-                .put("index.number_of_replicas", between(0, 1))
-                .build();
-    }
-
-    int numDocs;
-
-    @Before
-    public void init() throws Exception {
+    public void setupSuiteScopeCluster() throws Exception {
         createIndex("idx");
         numDocs = randomIntBetween(10, 20);
-        IndexRequestBuilder[] builders = new IndexRequestBuilder[numDocs];
-        for (int i = 0; i < builders.length; i++) {
-            builders[i] = client().prepareIndex("idx", "type").setSource(jsonBuilder()
+        List<IndexRequestBuilder> builders = new ArrayList<>();
+        for (int i = 0; i < numDocs; i++) {
+            builders.add(client().prepareIndex("idx", "type").setSource(jsonBuilder()
                     .startObject()
                     .field(SINGLE_VALUED_FIELD_NAME, i+1)
                     .startArray(MULTI_VALUED_FIELD_NAME).value(i+1).value(i+2).endArray()
-                    .endObject());
+                    .endObject()));
+        }
+        createIndex("idx_unmapped");
+        prepareCreate("empty_bucket_idx").addMapping("type", SINGLE_VALUED_FIELD_NAME, "type=integer").execute().actionGet();
+        for (int i = 0; i < 2; i++) {
+            builders.add(client().prepareIndex("empty_bucket_idx", "type", "" + i).setSource(jsonBuilder()
+                    .startObject()
+                    .field(SINGLE_VALUED_FIELD_NAME, i * 2)
+                    .endObject()));
         }
         indexRandom(true, builders);
-        createIndex("idx_unmapped");
         ensureSearchable();
     }
 
@@ -163,6 +160,48 @@ public class RangeTests extends ElasticsearchIntegrationTest {
         bucket = range.getBucketByKey("6.0-*");
         assertThat(bucket, notNullValue());
         assertThat(bucket.getKey(), equalTo("6.0-*"));
+        assertThat(bucket.getFrom().doubleValue(), equalTo(6.0));
+        assertThat(bucket.getTo().doubleValue(), equalTo(Double.POSITIVE_INFINITY));
+        assertThat(bucket.getDocCount(), equalTo(numDocs - 5L));
+    }
+
+    @Test
+    public void singleValueField_WithFormat() throws Exception {
+        SearchResponse response = client().prepareSearch("idx")
+                .addAggregation(range("range")
+                        .field(SINGLE_VALUED_FIELD_NAME)
+                        .addUnboundedTo(3)
+                        .addRange(3, 6)
+                        .addUnboundedFrom(6)
+                        .format("#")
+                )
+                .execute().actionGet();
+
+        assertSearchResponse(response);
+
+
+        Range range = response.getAggregations().get("range");
+        assertThat(range, notNullValue());
+        assertThat(range.getName(), equalTo("range"));
+        assertThat(range.getBuckets().size(), equalTo(3));
+
+        Range.Bucket bucket = range.getBucketByKey("*-3");
+        assertThat(bucket, notNullValue());
+        assertThat(bucket.getKey(), equalTo("*-3"));
+        assertThat(bucket.getFrom().doubleValue(), equalTo(Double.NEGATIVE_INFINITY));
+        assertThat(bucket.getTo().doubleValue(), equalTo(3.0));
+        assertThat(bucket.getDocCount(), equalTo(2l));
+
+        bucket = range.getBucketByKey("3-6");
+        assertThat(bucket, notNullValue());
+        assertThat(bucket.getKey(), equalTo("3-6"));
+        assertThat(bucket.getFrom().doubleValue(), equalTo(3.0));
+        assertThat(bucket.getTo().doubleValue(), equalTo(6.0));
+        assertThat(bucket.getDocCount(), equalTo(3l));
+
+        bucket = range.getBucketByKey("6-*");
+        assertThat(bucket, notNullValue());
+        assertThat(bucket.getKey(), equalTo("6-*"));
         assertThat(bucket.getFrom().doubleValue(), equalTo(6.0));
         assertThat(bucket.getTo().doubleValue(), equalTo(Double.POSITIVE_INFINITY));
         assertThat(bucket.getDocCount(), equalTo(numDocs - 5L));
@@ -911,16 +950,6 @@ public class RangeTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void emptyAggregation() throws Exception {
-        prepareCreate("empty_bucket_idx").addMapping("type", SINGLE_VALUED_FIELD_NAME, "type=integer").execute().actionGet();
-        List<IndexRequestBuilder> builders = new ArrayList<IndexRequestBuilder>();
-        for (int i = 0; i < 2; i++) {
-            builders.add(client().prepareIndex("empty_bucket_idx", "type", "" + i).setSource(jsonBuilder()
-                    .startObject()
-                    .field(SINGLE_VALUED_FIELD_NAME, i * 2)
-                    .endObject()));
-        }
-        indexRandom(true, builders.toArray(new IndexRequestBuilder[builders.size()]));
-
         SearchResponse searchResponse = client().prepareSearch("empty_bucket_idx")
                 .setQuery(matchAllQuery())
                 .addAggregation(histogram("histo").field(SINGLE_VALUED_FIELD_NAME).interval(1l).minDocCount(0)
@@ -934,7 +963,7 @@ public class RangeTests extends ElasticsearchIntegrationTest {
         assertThat(bucket, Matchers.notNullValue());
 
         Range range = bucket.getAggregations().get("range");
-        List<Range.Bucket> buckets = new ArrayList<Range.Bucket>(range.getBuckets());
+        List<Range.Bucket> buckets = new ArrayList<>(range.getBuckets());
         assertThat(range, Matchers.notNullValue());
         assertThat(range.getName(), equalTo("range"));
         assertThat(buckets.size(), is(1));

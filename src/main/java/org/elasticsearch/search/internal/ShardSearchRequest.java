@@ -19,8 +19,10 @@
 
 package org.elasticsearch.search.internal;
 
+import org.elasticsearch.Version;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchType;
+import org.elasticsearch.action.search.type.ParsedScrollId;
 import org.elasticsearch.cluster.routing.ShardRouting;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.bytes.BytesReference;
@@ -30,6 +32,7 @@ import org.elasticsearch.search.Scroll;
 import org.elasticsearch.transport.TransportRequest;
 
 import java.io.IOException;
+import java.util.Map;
 
 import static org.elasticsearch.search.Scroll.readScroll;
 
@@ -68,13 +71,18 @@ public class ShardSearchRequest extends TransportRequest {
 
     private BytesReference source;
     private BytesReference extraSource;
+    private BytesReference templateSource;
+    private String templateName;
+    private Map<String, String> templateParams;
 
     private long nowInMillis;
+
+    private boolean useSlowScroll;
 
     public ShardSearchRequest() {
     }
 
-    public ShardSearchRequest(SearchRequest searchRequest, ShardRouting shardRouting, int numberOfShards) {
+    public ShardSearchRequest(SearchRequest searchRequest, ShardRouting shardRouting, int numberOfShards, boolean useSlowScroll) {
         super(searchRequest);
         this.index = shardRouting.index();
         this.shardId = shardRouting.id();
@@ -82,9 +90,12 @@ public class ShardSearchRequest extends TransportRequest {
         this.searchType = searchRequest.searchType();
         this.source = searchRequest.source();
         this.extraSource = searchRequest.extraSource();
+        this.templateSource = searchRequest.templateSource();
+        this.templateName = searchRequest.templateName();
+        this.templateParams = searchRequest.templateParams();
         this.scroll = searchRequest.scroll();
         this.types = searchRequest.types();
-
+        this.useSlowScroll = useSlowScroll;
     }
 
     public ShardSearchRequest(ShardRouting shardRouting, int numberOfShards, SearchType searchType) {
@@ -132,6 +143,18 @@ public class ShardSearchRequest extends TransportRequest {
         return this;
     }
 
+    public BytesReference templateSource() {
+        return this.templateSource;
+    }
+
+    public String templateName() {
+        return templateName;
+    }
+
+    public Map<String, String> templateParams() {
+        return templateParams;
+    }
+
     public ShardSearchRequest nowInMillis(long nowInMillis) {
         this.nowInMillis = nowInMillis;
         return this;
@@ -168,6 +191,17 @@ public class ShardSearchRequest extends TransportRequest {
         return this;
     }
 
+    /**
+     * This setting is internal and will be enabled when at least one node is on versions 1.0.x and 1.1.x to enable
+     * scrolling that those versions support.
+     *
+     * @return Whether the scrolling should use regular search and incrementing the from on each round, which can
+     * bring down nodes due to the big priority queues being generated to accommodate from + size hits for sorting.
+     */
+    public boolean useSlowScroll() {
+        return useSlowScroll;
+    }
+
     @Override
     public void readFrom(StreamInput in) throws IOException {
         super.readFrom(in);
@@ -185,6 +219,20 @@ public class ShardSearchRequest extends TransportRequest {
         types = in.readStringArray();
         filteringAliases = in.readStringArray();
         nowInMillis = in.readVLong();
+
+        if (in.getVersion().onOrAfter(Version.V_1_1_0)) {
+            templateSource = in.readBytesReference();
+            templateName = in.readOptionalString();
+            if (in.readBoolean()) {
+                templateParams = (Map<String, String>) in.readGenericValue();
+            }
+        }
+        if (in.getVersion().onOrAfter(ParsedScrollId.SCROLL_SEARCH_AFTER_MINIMUM_VERSION)) {
+            useSlowScroll = in.readBoolean();
+        } else {
+            // This means that this request was send from a 1.0.x or 1.1.x node and we need to fallback to slow scroll.
+            useSlowScroll = in.getVersion().before(ParsedScrollId.SCROLL_SEARCH_AFTER_MINIMUM_VERSION);
+        }
     }
 
     @Override
@@ -205,5 +253,18 @@ public class ShardSearchRequest extends TransportRequest {
         out.writeStringArray(types);
         out.writeStringArrayNullable(filteringAliases);
         out.writeVLong(nowInMillis);
+
+        if (out.getVersion().onOrAfter(Version.V_1_1_0)) {
+            out.writeBytesReference(templateSource);
+            out.writeOptionalString(templateName);
+            boolean existTemplateParams = templateParams != null;
+            out.writeBoolean(existTemplateParams);
+            if (existTemplateParams) {
+                out.writeGenericValue(templateParams);
+            }
+        }
+        if (out.getVersion().onOrAfter(ParsedScrollId.SCROLL_SEARCH_AFTER_MINIMUM_VERSION)) {
+            out.writeBoolean(useSlowScroll);
+        }
     }
 }

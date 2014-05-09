@@ -27,14 +27,13 @@ import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
 import org.elasticsearch.test.ElasticsearchIntegrationTest.ClusterScope;
-import org.elasticsearch.test.ElasticsearchIntegrationTest.Scope;
 
 import static org.elasticsearch.common.settings.ImmutableSettings.settingsBuilder;
+import static org.elasticsearch.test.ElasticsearchIntegrationTest.*;
 import static org.hamcrest.Matchers.instanceOf;
 
-@ClusterScope(scope=Scope.TEST, numNodes=0)
+@ClusterScope(scope= Scope.TEST, numDataNodes =0)
 public class ShardsAllocatorModuleTests extends ElasticsearchIntegrationTest {
-
 
     public void testLoadDefaultShardsAllocator() {
         assertAllocatorInstance(ImmutableSettings.Builder.EMPTY_SETTINGS, BalancedShardsAllocator.class);
@@ -58,8 +57,8 @@ public class ShardsAllocatorModuleTests extends ElasticsearchIntegrationTest {
     }
 
     private void assertAllocatorInstance(Settings settings, Class<? extends ShardsAllocator> clazz) {
-        while (cluster().size() != 0) {
-            cluster().stopRandomNode();     
+        while (immutableCluster().size() != 0) {
+            cluster().stopRandomDataNode();
         }
         cluster().startNode(settings);
         ShardsAllocator instance = cluster().getInstance(ShardsAllocator.class);

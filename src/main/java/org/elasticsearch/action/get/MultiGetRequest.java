@@ -19,6 +19,7 @@
 
 package org.elasticsearch.action.get;
 
+import com.google.common.collect.Iterators;
 import org.elasticsearch.ElasticsearchIllegalArgumentException;
 import org.elasticsearch.ElasticsearchParseException;
 import org.elasticsearch.action.ActionRequest;
@@ -39,9 +40,10 @@ import org.elasticsearch.search.fetch.source.FetchSourceContext;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 
-public class MultiGetRequest extends ActionRequest<MultiGetRequest> {
+public class MultiGetRequest extends ActionRequest<MultiGetRequest> implements Iterable<MultiGetRequest.Item> {
 
     /**
      * A single get item.
@@ -201,7 +203,7 @@ public class MultiGetRequest extends ActionRequest<MultiGetRequest> {
     Boolean realtime;
     boolean refresh;
 
-    List<Item> items = new ArrayList<Item>();
+    List<Item> items = new ArrayList<>();
 
     public MultiGetRequest add(Item item) {
         items.add(item);
@@ -277,8 +279,7 @@ public class MultiGetRequest extends ActionRequest<MultiGetRequest> {
     }
 
     public MultiGetRequest add(@Nullable String defaultIndex, @Nullable String defaultType, @Nullable String[] defaultFields, @Nullable FetchSourceContext defaultFetchSource, @Nullable String defaultRouting, BytesReference data, boolean allowExplicitIndex) throws Exception {
-        XContentParser parser = XContentFactory.xContent(data).createParser(data);
-        try {
+        try (XContentParser parser = XContentFactory.xContent(data).createParser(data)) {
             XContentParser.Token token;
             String currentFieldName = null;
             while ((token = parser.nextToken()) != XContentParser.Token.END_OBJECT) {
@@ -319,7 +320,7 @@ public class MultiGetRequest extends ActionRequest<MultiGetRequest> {
                                     } else if ("_parent".equals(currentFieldName) || "parent".equals(currentFieldName)) {
                                         parent = parser.text();
                                     } else if ("fields".equals(currentFieldName)) {
-                                        fields = new ArrayList<String>();
+                                        fields = new ArrayList<>();
                                         fields.add(parser.text());
                                     } else if ("_version".equals(currentFieldName) || "version".equals(currentFieldName)) {
                                         version = parser.longValue();
@@ -336,12 +337,12 @@ public class MultiGetRequest extends ActionRequest<MultiGetRequest> {
                                     }
                                 } else if (token == XContentParser.Token.START_ARRAY) {
                                     if ("fields".equals(currentFieldName)) {
-                                        fields = new ArrayList<String>();
+                                        fields = new ArrayList<>();
                                         while ((token = parser.nextToken()) != XContentParser.Token.END_ARRAY) {
                                             fields.add(parser.text());
                                         }
                                     } else if ("_source".equals(currentFieldName)) {
-                                        ArrayList<String> includes = new ArrayList<String>();
+                                        ArrayList<String> includes = new ArrayList<>();
                                         while ((token = parser.nextToken()) != XContentParser.Token.END_ARRAY) {
                                             includes.add(parser.text());
                                         }
@@ -356,9 +357,9 @@ public class MultiGetRequest extends ActionRequest<MultiGetRequest> {
                                             if (token == XContentParser.Token.FIELD_NAME) {
                                                 currentFieldName = parser.currentName();
                                                 if ("includes".equals(currentFieldName) || "include".equals(currentFieldName)) {
-                                                    currentList = includes != null ? includes : (includes = new ArrayList<String>(2));
+                                                    currentList = includes != null ? includes : (includes = new ArrayList<>(2));
                                                 } else if ("excludes".equals(currentFieldName) || "exclude".equals(currentFieldName)) {
-                                                    currentList = excludes != null ? excludes : (excludes = new ArrayList<String>(2));
+                                                    currentList = excludes != null ? excludes : (excludes = new ArrayList<>(2));
                                                 } else {
                                                     throw new ElasticsearchParseException("Source definition may not contain " + parser.text());
                                                 }
@@ -398,10 +399,13 @@ public class MultiGetRequest extends ActionRequest<MultiGetRequest> {
                     }
                 }
             }
-        } finally {
-            parser.close();
         }
         return this;
+    }
+
+    @Override
+    public Iterator<Item> iterator() {
+        return Iterators.unmodifiableIterator(items.iterator());
     }
 
     @Override
@@ -417,7 +421,7 @@ public class MultiGetRequest extends ActionRequest<MultiGetRequest> {
         }
 
         int size = in.readVInt();
-        items = new ArrayList<Item>(size);
+        items = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
             items.add(Item.readItem(in));
         }

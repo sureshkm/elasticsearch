@@ -21,18 +21,18 @@ package org.elasticsearch.search.aggregations.bucket.range;
 import com.google.common.collect.Lists;
 import org.apache.lucene.index.AtomicReaderContext;
 import org.apache.lucene.util.InPlaceMergeSorter;
+import org.elasticsearch.common.Nullable;
 import org.elasticsearch.index.fielddata.DoubleValues;
-import org.elasticsearch.search.aggregations.Aggregator;
-import org.elasticsearch.search.aggregations.AggregatorFactories;
-import org.elasticsearch.search.aggregations.InternalAggregation;
-import org.elasticsearch.search.aggregations.InternalAggregations;
+import org.elasticsearch.search.aggregations.*;
 import org.elasticsearch.search.aggregations.bucket.BucketsAggregator;
 import org.elasticsearch.search.aggregations.support.AggregationContext;
-import org.elasticsearch.search.aggregations.support.ValueSourceAggregatorFactory;
+import org.elasticsearch.search.aggregations.support.ValuesSource;
+import org.elasticsearch.search.aggregations.support.ValuesSourceAggregatorFactory;
 import org.elasticsearch.search.aggregations.support.ValuesSourceConfig;
-import org.elasticsearch.search.aggregations.support.numeric.NumericValuesSource;
-import org.elasticsearch.search.aggregations.support.numeric.ValueFormatter;
-import org.elasticsearch.search.aggregations.support.numeric.ValueParser;
+import org.elasticsearch.search.aggregations.support.format.ValueFormat;
+import org.elasticsearch.search.aggregations.support.format.ValueFormatter;
+import org.elasticsearch.search.aggregations.support.format.ValueParser;
+import org.elasticsearch.search.internal.SearchContext;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -68,17 +68,19 @@ public class RangeAggregator extends BucketsAggregator {
             return "[" + from + " to " + to + ")";
         }
 
-        public void process(ValueParser parser, AggregationContext aggregationContext) {
+        public void process(ValueParser parser, SearchContext context) {
+            assert parser != null;
             if (fromAsStr != null) {
-                from = parser != null ? parser.parseDouble(fromAsStr, aggregationContext.searchContext()) : Double.valueOf(fromAsStr);
+                from = parser.parseDouble(fromAsStr, context);
             }
             if (toAsStr != null) {
-                to = parser != null ? parser.parseDouble(toAsStr, aggregationContext.searchContext()) : Double.valueOf(toAsStr);
+                to = parser.parseDouble(toAsStr, context);
             }
         }
     }
 
-    private final NumericValuesSource valuesSource;
+    private final ValuesSource.Numeric valuesSource;
+    private final @Nullable ValueFormatter formatter;
     private final Range[] ranges;
     private final boolean keyed;
     private final InternalRange.Factory rangeFactory;
@@ -88,7 +90,8 @@ public class RangeAggregator extends BucketsAggregator {
 
     public RangeAggregator(String name,
                            AggregatorFactories factories,
-                           NumericValuesSource valuesSource,
+                           ValuesSource.Numeric valuesSource,
+                           @Nullable ValueFormat format,
                            InternalRange.Factory rangeFactory,
                            List<Range> ranges,
                            boolean keyed,
@@ -98,11 +101,14 @@ public class RangeAggregator extends BucketsAggregator {
         super(name, BucketAggregationMode.MULTI_BUCKETS, factories, ranges.size() * (parent == null ? 1 : parent.estimatedBucketCount()), aggregationContext, parent);
         assert valuesSource != null;
         this.valuesSource = valuesSource;
+        this.formatter = format != null ? format.formatter() : null;
         this.keyed = keyed;
         this.rangeFactory = rangeFactory;
         this.ranges = ranges.toArray(new Range[ranges.size()]);
+
+        ValueParser parser = format != null ? format.parser() : ValueParser.RAW;
         for (int i = 0; i < this.ranges.length; i++) {
-            this.ranges[i].process(valuesSource.parser(), context);
+            this.ranges[i].process(parser, context.searchContext());
         }
         sortRanges(this.ranges);
 
@@ -192,12 +198,11 @@ public class RangeAggregator extends BucketsAggregator {
         for (int i = 0; i < ranges.length; i++) {
             Range range = ranges[i];
             final long bucketOrd = subBucketOrdinal(owningBucketOrdinal, i);
-            org.elasticsearch.search.aggregations.bucket.range.Range.Bucket bucket = rangeFactory.createBucket(
-                    range.key, range.from, range.to, bucketDocCount(bucketOrd),bucketAggregations(bucketOrd), valuesSource.formatter());
+            org.elasticsearch.search.aggregations.bucket.range.Range.Bucket bucket =
+                    rangeFactory.createBucket(range.key, range.from, range.to, bucketDocCount(bucketOrd),bucketAggregations(bucketOrd), formatter);
             buckets.add(bucket);
         }
         // value source can be null in the case of unmapped fields
-        ValueFormatter formatter = valuesSource != null ? valuesSource.formatter() : null;
         return rangeFactory.create(name, buckets, formatter, keyed, false);
     }
 
@@ -207,12 +212,11 @@ public class RangeAggregator extends BucketsAggregator {
         List<org.elasticsearch.search.aggregations.bucket.range.Range.Bucket> buckets = Lists.newArrayListWithCapacity(ranges.length);
         for (int i = 0; i < ranges.length; i++) {
             Range range = ranges[i];
-            org.elasticsearch.search.aggregations.bucket.range.Range.Bucket bucket = rangeFactory.createBucket(
-                    range.key, range.from, range.to, 0, subAggs, valuesSource.formatter());
+            org.elasticsearch.search.aggregations.bucket.range.Range.Bucket bucket =
+                    rangeFactory.createBucket(range.key, range.from, range.to, 0, subAggs, formatter);
             buckets.add(bucket);
         }
         // value source can be null in the case of unmapped fields
-        ValueFormatter formatter = valuesSource != null ? valuesSource.formatter() : null;
         return rangeFactory.create(name, buckets, formatter, keyed, false);
     }
 
@@ -237,57 +241,36 @@ public class RangeAggregator extends BucketsAggregator {
         }.sort(0, ranges.length);
     }
 
-    public static class Unmapped extends Aggregator {
+    public static class Unmapped extends NonCollectingAggregator {
 
         private final List<RangeAggregator.Range> ranges;
         private final boolean keyed;
         private final InternalRange.Factory factory;
         private final ValueFormatter formatter;
-        private final ValueParser parser;
 
         public Unmapped(String name,
                         List<RangeAggregator.Range> ranges,
                         boolean keyed,
-                        ValueFormatter formatter,
-                        ValueParser parser,
-                        AggregationContext aggregationContext,
+                        ValueFormat format,
+                        AggregationContext context,
                         Aggregator parent,
                         InternalRange.Factory factory) {
 
-            super(name, BucketAggregationMode.MULTI_BUCKETS, AggregatorFactories.EMPTY, 0, aggregationContext, parent);
+            super(name, context, parent);
             this.ranges = ranges;
+            ValueParser parser = format != null ? format.parser() : ValueParser.RAW;
             for (Range range : this.ranges) {
-                range.process(parser, context);
+                range.process(parser, context.searchContext());
             }
             this.keyed = keyed;
-            this.formatter = formatter;
-            this.parser = parser;
+            this.formatter = format != null ? format.formatter() : null;
             this.factory = factory;
         }
 
         @Override
-        public boolean shouldCollect() {
-            return false;
-        }
-
-        @Override
-        public void setNextReader(AtomicReaderContext reader) {
-        }
-
-        @Override
-        public void collect(int doc, long owningBucketOrdinal) throws IOException {
-        }
-
-        @Override
-        public InternalRange buildAggregation(long owningBucketOrdinal) {
-            return buildEmptyAggregation();
-        }
-
-        @Override
-        public InternalRange buildEmptyAggregation() {
+        public InternalAggregation buildEmptyAggregation() {
             InternalAggregations subAggs = buildEmptySubAggregations();
-            List<org.elasticsearch.search.aggregations.bucket.range.Range.Bucket> buckets =
-                    new ArrayList<org.elasticsearch.search.aggregations.bucket.range.Range.Bucket>(ranges.size());
+            List<org.elasticsearch.search.aggregations.bucket.range.Range.Bucket> buckets = new ArrayList<>(ranges.size());
             for (RangeAggregator.Range range : ranges) {
                 buckets.add(factory.createBucket(range.key, range.from, range.to, 0, subAggs, formatter));
             }
@@ -295,13 +278,13 @@ public class RangeAggregator extends BucketsAggregator {
         }
     }
 
-    public static class Factory extends ValueSourceAggregatorFactory<NumericValuesSource> {
+    public static class Factory extends ValuesSourceAggregatorFactory<ValuesSource.Numeric> {
 
         private final InternalRange.Factory rangeFactory;
         private final List<Range> ranges;
         private final boolean keyed;
 
-        public Factory(String name, ValuesSourceConfig<NumericValuesSource> valueSourceConfig, InternalRange.Factory rangeFactory, List<Range> ranges, boolean keyed) {
+        public Factory(String name, ValuesSourceConfig<ValuesSource.Numeric> valueSourceConfig, InternalRange.Factory rangeFactory, List<Range> ranges, boolean keyed) {
             super(name, rangeFactory.type(), valueSourceConfig);
             this.rangeFactory = rangeFactory;
             this.ranges = ranges;
@@ -310,12 +293,12 @@ public class RangeAggregator extends BucketsAggregator {
 
         @Override
         protected Aggregator createUnmapped(AggregationContext aggregationContext, Aggregator parent) {
-            return new Unmapped(name, ranges, keyed, valuesSourceConfig.formatter(), valuesSourceConfig.parser(), aggregationContext, parent, rangeFactory);
+            return new Unmapped(name, ranges, keyed, config.format(), aggregationContext, parent, rangeFactory);
         }
 
         @Override
-        protected Aggregator create(NumericValuesSource valuesSource, long expectedBucketsCount, AggregationContext aggregationContext, Aggregator parent) {
-            return new RangeAggregator(name, factories, valuesSource, rangeFactory, ranges, keyed, aggregationContext, parent);
+        protected Aggregator create(ValuesSource.Numeric valuesSource, long expectedBucketsCount, AggregationContext aggregationContext, Aggregator parent) {
+            return new RangeAggregator(name, factories, valuesSource, config.format(), rangeFactory, ranges, keyed, aggregationContext, parent);
         }
     }
 

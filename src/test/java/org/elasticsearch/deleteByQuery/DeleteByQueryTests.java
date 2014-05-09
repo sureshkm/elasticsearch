@@ -19,6 +19,7 @@
 
 package org.elasticsearch.deleteByQuery;
 
+import org.elasticsearch.action.ShardOperationFailedException;
 import org.elasticsearch.action.deletebyquery.DeleteByQueryRequestBuilder;
 import org.elasticsearch.action.deletebyquery.DeleteByQueryResponse;
 import org.elasticsearch.action.search.SearchResponse;
@@ -27,12 +28,10 @@ import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.indices.IndexMissingException;
 import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
-import org.junit.Assert;
 import org.junit.Test;
 
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertHitCount;
-import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.*;
 
 public class DeleteByQueryTests extends ElasticsearchIntegrationTest {
 
@@ -83,12 +82,13 @@ public class DeleteByQueryTests extends ElasticsearchIntegrationTest {
         deleteByQueryRequestBuilder.setQuery(QueryBuilders.matchAllQuery());
 
         try {
-            DeleteByQueryResponse actionGet = deleteByQueryRequestBuilder.execute().actionGet();
-            Assert.fail("Exception should have been thrown.");
+            deleteByQueryRequestBuilder.execute().actionGet();
+            fail("Exception should have been thrown.");
         } catch (IndexMissingException e) {
+            //everything well
         }
 
-        deleteByQueryRequestBuilder.setIndicesOptions(IndicesOptions.lenient());
+        deleteByQueryRequestBuilder.setIndicesOptions(IndicesOptions.lenientExpandOpen());
         DeleteByQueryResponse actionGet = deleteByQueryRequestBuilder.execute().actionGet();
         assertThat(actionGet.status(), equalTo(RestStatus.OK));
         assertThat(actionGet.getIndex("twitter").getFailedShards(), equalTo(0));
@@ -107,15 +107,25 @@ public class DeleteByQueryTests extends ElasticsearchIntegrationTest {
                 .setQuery(QueryBuilders.hasChildQuery("type", QueryBuilders.matchAllQuery()))
                 .execute().actionGet();
 
+        NumShards twitter = getNumShards("twitter");
+
         assertThat(response.status(), equalTo(RestStatus.BAD_REQUEST));
         assertThat(response.getIndex("twitter").getSuccessfulShards(), equalTo(0));
-        assertThat(response.getIndex("twitter").getFailedShards(), equalTo(5));
+        assertThat(response.getIndex("twitter").getFailedShards(), equalTo(twitter.numPrimaries));
+        assertThat(response.getIndices().size(), equalTo(1));
+        assertThat(response.getIndices().get("twitter").getFailedShards(), equalTo(twitter.numPrimaries));
+        assertThat(response.getIndices().get("twitter").getFailures().length, equalTo(twitter.numPrimaries));
+        for (ShardOperationFailedException failure : response.getIndices().get("twitter").getFailures()) {
+            assertThat(failure.reason(), containsString("[twitter] [has_child] unsupported in delete_by_query api"));
+            assertThat(failure.status(), equalTo(RestStatus.BAD_REQUEST));
+            assertThat(failure.shardId(), greaterThan(-1));
+        }
     }
 
     @Test
     public void testDeleteByFieldQuery() throws Exception {
         client().admin().indices().prepareCreate("test").execute().actionGet();
-        int numDocs = atLeast(10);
+        int numDocs = scaledRandomIntBetween(10, 100);
         for (int i = 0; i < numDocs; i++) {
             client().prepareIndex("test", "test", Integer.toString(i))
                     .setRouting(randomAsciiOfLengthBetween(1, 5))
@@ -131,5 +141,17 @@ public class DeleteByQueryTests extends ElasticsearchIntegrationTest {
         assertHitCount(client().prepareCount("test").setQuery(QueryBuilders.matchAllQuery()).get(), numDocs - 1);
 
     }
+
+    @Test
+    public void testDateMath() throws Exception {
+        index("test", "type", "1", "d", "2013-01-01");
+        ensureGreen();
+        refresh();
+        assertHitCount(client().prepareCount("test").get(), 1);
+        client().prepareDeleteByQuery("test").setQuery(QueryBuilders.rangeQuery("d").to("now-1h")).get();
+        refresh();
+        assertHitCount(client().prepareCount("test").get(), 0);
+    }
+
 
 }

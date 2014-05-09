@@ -26,6 +26,7 @@ import org.apache.lucene.analysis.commongrams.CommonGramsFilter;
 import org.apache.lucene.analysis.core.LowerCaseFilter;
 import org.apache.lucene.analysis.core.StopAnalyzer;
 import org.apache.lucene.analysis.core.StopFilter;
+import org.apache.lucene.analysis.core.UpperCaseFilter;
 import org.apache.lucene.analysis.cz.CzechStemFilter;
 import org.apache.lucene.analysis.de.GermanStemFilter;
 import org.apache.lucene.analysis.en.KStemFilter;
@@ -59,12 +60,21 @@ public enum PreBuiltTokenFilters {
     WORD_DELIMITER(CachingStrategy.ONE) {
         @Override
         public TokenStream create(TokenStream tokenStream, Version version) {
-            return new WordDelimiterFilter(tokenStream,
-                       WordDelimiterFilter.GENERATE_WORD_PARTS |
-                       WordDelimiterFilter.GENERATE_NUMBER_PARTS |
-                       WordDelimiterFilter.SPLIT_ON_CASE_CHANGE |
-                       WordDelimiterFilter.SPLIT_ON_NUMERICS |
-                       WordDelimiterFilter.STEM_ENGLISH_POSSESSIVE, null);
+            if (version.luceneVersion.onOrAfter(org.apache.lucene.util.Version.LUCENE_48)) {
+                return new WordDelimiterFilter(version.luceneVersion, tokenStream,
+                           WordDelimiterFilter.GENERATE_WORD_PARTS |
+                           WordDelimiterFilter.GENERATE_NUMBER_PARTS |
+                           WordDelimiterFilter.SPLIT_ON_CASE_CHANGE |
+                           WordDelimiterFilter.SPLIT_ON_NUMERICS |
+                           WordDelimiterFilter.STEM_ENGLISH_POSSESSIVE, null);
+            } else {
+                return new Lucene47WordDelimiterFilter(tokenStream,
+                           WordDelimiterFilter.GENERATE_WORD_PARTS |
+                           WordDelimiterFilter.GENERATE_NUMBER_PARTS |
+                           WordDelimiterFilter.SPLIT_ON_CASE_CHANGE |
+                           WordDelimiterFilter.SPLIT_ON_NUMERICS |
+                           WordDelimiterFilter.STEM_ENGLISH_POSSESSIVE, null);
+            }
         }
     },
 
@@ -114,6 +124,13 @@ public enum PreBuiltTokenFilters {
         @Override
         public TokenStream create(TokenStream tokenStream, Version version) {
             return new LowerCaseFilter(version.luceneVersion, tokenStream);
+        }
+    },
+
+    UPPERCASE(CachingStrategy.LUCENE) {
+        @Override
+        public TokenStream create(TokenStream tokenStream, Version version) {
+            return new UpperCaseFilter(version.luceneVersion, tokenStream);
         }
     },
 

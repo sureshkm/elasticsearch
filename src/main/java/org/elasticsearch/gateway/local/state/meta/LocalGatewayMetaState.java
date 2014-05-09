@@ -132,12 +132,14 @@ public class LocalGatewayMetaState extends AbstractComponent implements ClusterS
             formatParams = new ToXContent.MapParams(params);
             Map<String, String> globalOnlyParams = Maps.newHashMap();
             globalOnlyParams.put("binary", "true");
-            globalOnlyParams.put(MetaData.GLOBAL_PERSISTENT_ONLY_PARAM, "true");
+            globalOnlyParams.put(MetaData.PERSISTENT_ONLY_PARAM, "true");
+            globalOnlyParams.put(MetaData.GLOBAL_ONLY_PARAM, "true");
             globalOnlyFormatParams = new ToXContent.MapParams(globalOnlyParams);
         } else {
             formatParams = ToXContent.EMPTY_PARAMS;
             Map<String, String> globalOnlyParams = Maps.newHashMap();
-            globalOnlyParams.put(MetaData.GLOBAL_PERSISTENT_ONLY_PARAM, "true");
+            globalOnlyParams.put(MetaData.PERSISTENT_ONLY_PARAM, "true");
+            globalOnlyParams.put(MetaData.GLOBAL_ONLY_PARAM, "true");
             globalOnlyFormatParams = new ToXContent.MapParams(globalOnlyParams);
         }
 
@@ -356,7 +358,7 @@ public class LocalGatewayMetaState extends AbstractComponent implements ClusterS
             try {
                 fos = new FileOutputStream(stateFile);
                 BytesReference bytes = builder.bytes();
-                fos.write(bytes.array(), bytes.arrayOffset(), bytes.length());
+                bytes.writeTo(fos);
                 fos.getChannel().force(true);
                 fos.close();
                 wroteAtLeastOnce = true;
@@ -412,7 +414,7 @@ public class LocalGatewayMetaState extends AbstractComponent implements ClusterS
             try {
                 fos = new FileOutputStream(stateFile);
                 BytesReference bytes = builder.bytes();
-                fos.write(bytes.array(), bytes.arrayOffset(), bytes.length());
+                bytes.writeTo(fos);
                 fos.getChannel().force(true);
                 fos.close();
                 wroteAtLeastOnce = true;
@@ -589,8 +591,7 @@ public class LocalGatewayMetaState extends AbstractComponent implements ClusterS
                         if (data.length == 0) {
                             continue;
                         }
-                        XContentParser parser = XContentHelper.createParser(data, 0, data.length);
-                        try {
+                        try (XContentParser parser = XContentHelper.createParser(data, 0, data.length)) {
                             String currentFieldName = null;
                             XContentParser.Token token = parser.nextToken();
                             if (token != null) {
@@ -608,8 +609,6 @@ public class LocalGatewayMetaState extends AbstractComponent implements ClusterS
                                     }
                                 }
                             }
-                        } finally {
-                            parser.close();
                         }
                         index = fileIndex;
                         metaDataFile = stateFile;

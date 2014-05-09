@@ -43,9 +43,9 @@ and warmers.
 [float]
 [[monitoring]]
 == Monitoring:
-* <<indices-status>>
 * <<indices-stats>>
 * <<indices-segments>>
+* <<indices-recovery>>
 
 [float]
 [[status-management]]
@@ -54,7 +54,6 @@ and warmers.
 * <<indices-refresh>>
 * <<indices-flush>>
 * <<indices-optimize>>
-* <<indices-gateway-snapshot>>
 
 --
 
@@ -88,11 +87,11 @@ include::indices/templates.asciidoc[]
 
 include::indices/warmers.asciidoc[]
 
-include::indices/status.asciidoc[]
-
 include::indices/stats.asciidoc[]
 
 include::indices/segments.asciidoc[]
+
+include::indices/recovery.asciidoc[]
 
 include::indices/clearcache.asciidoc[]
 
@@ -101,6 +100,4 @@ include::indices/flush.asciidoc[]
 include::indices/refresh.asciidoc[]
 
 include::indices/optimize.asciidoc[]
-
-include::indices/gateway-snapshot.asciidoc[]
 

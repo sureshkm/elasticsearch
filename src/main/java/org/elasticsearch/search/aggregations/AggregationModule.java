@@ -32,10 +32,14 @@ import org.elasticsearch.search.aggregations.bucket.range.RangeParser;
 import org.elasticsearch.search.aggregations.bucket.range.date.DateRangeParser;
 import org.elasticsearch.search.aggregations.bucket.range.geodistance.GeoDistanceParser;
 import org.elasticsearch.search.aggregations.bucket.range.ipv4.IpRangeParser;
+import org.elasticsearch.search.aggregations.bucket.nested.ReverseNestedParser;
+import org.elasticsearch.search.aggregations.bucket.significant.SignificantTermsParser;
 import org.elasticsearch.search.aggregations.bucket.terms.TermsParser;
 import org.elasticsearch.search.aggregations.metrics.avg.AvgParser;
+import org.elasticsearch.search.aggregations.metrics.cardinality.CardinalityParser;
 import org.elasticsearch.search.aggregations.metrics.max.MaxParser;
 import org.elasticsearch.search.aggregations.metrics.min.MinParser;
+import org.elasticsearch.search.aggregations.metrics.percentiles.PercentilesParser;
 import org.elasticsearch.search.aggregations.metrics.stats.StatsParser;
 import org.elasticsearch.search.aggregations.metrics.stats.extended.ExtendedStatsParser;
 import org.elasticsearch.search.aggregations.metrics.sum.SumParser;
@@ -58,11 +62,14 @@ public class AggregationModule extends AbstractModule {
         parsers.add(StatsParser.class);
         parsers.add(ExtendedStatsParser.class);
         parsers.add(ValueCountParser.class);
+        parsers.add(PercentilesParser.class);
+        parsers.add(CardinalityParser.class);
 
         parsers.add(GlobalParser.class);
         parsers.add(MissingParser.class);
         parsers.add(FilterParser.class);
         parsers.add(TermsParser.class);
+        parsers.add(SignificantTermsParser.class);
         parsers.add(RangeParser.class);
         parsers.add(DateRangeParser.class);
         parsers.add(IpRangeParser.class);
@@ -71,6 +78,7 @@ public class AggregationModule extends AbstractModule {
         parsers.add(GeoDistanceParser.class);
         parsers.add(GeoHashGridParser.class);
         parsers.add(NestedParser.class);
+        parsers.add(ReverseNestedParser.class);
     }
 
     /**

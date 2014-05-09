@@ -42,9 +42,9 @@ import java.util.Map;
 import static org.elasticsearch.action.ValidateActions.addValidationError;
 import static org.elasticsearch.common.Strings.EMPTY_ARRAY;
 import static org.elasticsearch.common.Strings.hasLength;
-import static org.elasticsearch.common.settings.ImmutableSettings.Builder.EMPTY_SETTINGS;
 import static org.elasticsearch.common.settings.ImmutableSettings.readSettingsFromStream;
 import static org.elasticsearch.common.settings.ImmutableSettings.writeSettingsToStream;
+import static org.elasticsearch.common.settings.ImmutableSettings.Builder.EMPTY_SETTINGS;
 import static org.elasticsearch.common.xcontent.support.XContentMapValues.nodeBooleanValue;
 
 /**
@@ -69,7 +69,7 @@ public class CreateSnapshotRequest extends MasterNodeOperationRequest<CreateSnap
 
     private String[] indices = EMPTY_ARRAY;
 
-    private IndicesOptions indicesOptions = IndicesOptions.strict();
+    private IndicesOptions indicesOptions = IndicesOptions.strictExpandOpen();
 
     private boolean partial = false;
 
@@ -104,11 +104,12 @@ public class CreateSnapshotRequest extends MasterNodeOperationRequest<CreateSnap
         }
         if (indices == null) {
             validationException = addValidationError("indices is null", validationException);
-        }
-        for (String index : indices) {
-            if (index == null) {
-                validationException = addValidationError("index is null", validationException);
-                break;
+        } else {
+            for (String index : indices) {
+                if (index == null) {
+                    validationException = addValidationError("index is null", validationException);
+                    break;
+                }
             }
         }
         if (indicesOptions == null) {
@@ -363,10 +364,10 @@ public class CreateSnapshotRequest extends MasterNodeOperationRequest<CreateSnap
      * @return this request
      */
     public CreateSnapshotRequest source(Map source) {
-        boolean ignoreUnavailable = IndicesOptions.lenient().ignoreUnavailable();
-        boolean allowNoIndices = IndicesOptions.lenient().allowNoIndices();
-        boolean expandWildcardsOpen = IndicesOptions.lenient().expandWildcardsOpen();
-        boolean expandWildcardsClosed = IndicesOptions.lenient().expandWildcardsClosed();
+        boolean ignoreUnavailable = IndicesOptions.lenientExpandOpen().ignoreUnavailable();
+        boolean allowNoIndices = IndicesOptions.lenientExpandOpen().allowNoIndices();
+        boolean expandWildcardsOpen = IndicesOptions.lenientExpandOpen().expandWildcardsOpen();
+        boolean expandWildcardsClosed = IndicesOptions.lenientExpandOpen().expandWildcardsClosed();
         for (Map.Entry<String, Object> entry : ((Map<String, Object>) source).entrySet()) {
             String name = entry.getKey();
             if (name.equals("indices")) {

@@ -38,7 +38,7 @@ public class InternalCircuitBreakerService extends AbstractLifecycleComponent<In
     public static final String CIRCUIT_BREAKER_OVERHEAD_SETTING = "indices.fielddata.breaker.overhead";
 
     public static final double DEFAULT_OVERHEAD_CONSTANT = 1.03;
-    private static final String DEFAULT_BREAKER_LIMIT = "80%";
+    private static final String DEFAULT_BREAKER_LIMIT = "60%";
 
     private volatile MemoryCircuitBreaker breaker;
     private volatile long maxBytes;
@@ -59,12 +59,13 @@ public class InternalCircuitBreakerService extends AbstractLifecycleComponent<In
         @Override
         public void onRefreshSettings(Settings settings) {
             // clear breaker now that settings have changed
-            long newMaxByteSizeValue = settings.getAsMemory(CIRCUIT_BREAKER_MAX_BYTES_SETTING, DEFAULT_BREAKER_LIMIT).bytes();
+            long newMaxByteSizeValue = settings.getAsMemory(CIRCUIT_BREAKER_MAX_BYTES_SETTING, Long.toString(maxBytes)).bytes();
             boolean breakerResetNeeded = false;
 
             if (newMaxByteSizeValue != maxBytes) {
-                logger.info("updating [{}] from [{}] to [{}]", CIRCUIT_BREAKER_MAX_BYTES_SETTING,
-                        new ByteSizeValue(InternalCircuitBreakerService.this.maxBytes), newMaxByteSizeValue);
+                logger.info("updating [{}] from [{}]({}) to [{}]({})", CIRCUIT_BREAKER_MAX_BYTES_SETTING,
+                        InternalCircuitBreakerService.this.maxBytes, new ByteSizeValue(InternalCircuitBreakerService.this.maxBytes),
+                        newMaxByteSizeValue, new ByteSizeValue(newMaxByteSizeValue));
                 maxBytes = newMaxByteSizeValue;
                 breakerResetNeeded = true;
             }

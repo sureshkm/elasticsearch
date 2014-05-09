@@ -77,12 +77,12 @@ public class TermsStatsStringFacetExecutor extends FacetExecutor {
     @Override
     public InternalFacet buildFacet(String facetName) {
         if (entries.v().isEmpty()) {
-            entries.release();
+            entries.close();
             return new InternalTermsStatsStringFacet(facetName, comparatorType, size, ImmutableList.<InternalTermsStatsStringFacet.StringEntry>of(), missing);
         }
         if (size == 0) { // all terms
             // all terms, just return the collection, we will sort it on the way back
-            List<InternalTermsStatsStringFacet.StringEntry> stringEntries = new ArrayList<InternalTermsStatsStringFacet.StringEntry>();
+            List<InternalTermsStatsStringFacet.StringEntry> stringEntries = new ArrayList<>();
             final boolean[] states = entries.v().allocated;
             final Object[] values = entries.v().values;
             for (int i = 0; i < states.length; i++) {
@@ -105,7 +105,7 @@ public class TermsStatsStringFacetExecutor extends FacetExecutor {
             ordered.add(value);
         }
 
-        entries.release();
+        entries.close();
         return new InternalTermsStatsStringFacet(facetName, comparatorType, size, ordered, missing);
     }
 

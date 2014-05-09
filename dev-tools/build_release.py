@@ -30,6 +30,8 @@ import socket
 import urllib.request
 
 from http.client import HTTPConnection
+from http.client import HTTPSConnection
+
 
 """ 
  This tool builds a release from the a given elasticsearch branch.
@@ -40,7 +42,7 @@ from http.client import HTTPConnection
  '--publish' option is set the actual release is done. The script takes over almost all
  steps necessary for a release from a high level point of view it does the following things:
 
-  - run prerequisit checks ie. check for Java 1.6 being presend or S3 credentials available as env variables
+  - run prerequisit checks ie. check for Java 1.7 being presend or S3 credentials available as env variables
   - detect the version to release from the specified branch (--branch) or the current branch
   - creates a release branch & updates pom.xml and Version.java to point to a release version rather than a snapshot
   - builds the artifacts and runs smoke-tests on the build zip & tar.gz files
@@ -87,12 +89,12 @@ try:
 except KeyError:
   raise RuntimeError("""
   Please set JAVA_HOME in the env before running release tool
-  On OSX use: export JAVA_HOME=`/usr/libexec/java_home -v '1.6*'`""")
+  On OSX use: export JAVA_HOME=`/usr/libexec/java_home -v '1.7*'`""")
 
 try:
-  JAVA_HOME = env['JAVA6_HOME']
+  JAVA_HOME = env['JAVA7_HOME']
 except KeyError:
-  pass #no JAVA6_HOME - we rely on JAVA_HOME
+  pass #no JAVA7_HOME - we rely on JAVA_HOME
 
 
 try:
@@ -114,8 +116,8 @@ def verify_java_version(version):
   if s.find(' version "%s.' % version) == -1:
     raise RuntimeError('got wrong version for java %s:\n%s' % (version, s))
 
-# Verifies the java version. We guarantee that we run with Java 1.6
-# If 1.6 is not available fail the build!
+# Verifies the java version. We guarantee that we run with Java 1.7
+# If 1.7 is not available fail the build!
 def verify_mvn_java_version(version, mvn):
   s = os.popen('%s; %s --version 2>&1' % (java_exe(), mvn)).read()
   if s.find('Java version: %s' % version) == -1:
@@ -133,8 +135,8 @@ def get_tag_hash(tag):
 def get_current_branch():
   return os.popen('git rev-parse --abbrev-ref HEAD  2>&1').read().strip()
 
-verify_java_version('1.6') # we require to build with 1.6
-verify_mvn_java_version('1.6', MVN)
+verify_java_version('1.7') # we require to build with 1.7
+verify_mvn_java_version('1.7', MVN)
 
 # Utility that returns the name of the release branch for a given version
 def release_branch(version):
@@ -205,7 +207,7 @@ def remove_maven_snapshot(pom, release):
 
 # Moves the Version.java file from a snapshot to a release
 def remove_version_snapshot(version_file, release):
-  # 1.0.0.Beta1 -> 1_0_0_Beat1
+  # 1.0.0.Beta1 -> 1_0_0_Beta1
   release = release.replace('.', '_')
   pattern = 'new Version(V_%s_ID, true' % (release)
   replacement = 'new Version(V_%s_ID, false' % (release)
@@ -222,6 +224,9 @@ def add_pending_files(*files):
 def commit_release(release):
   run('git commit -m "release [%s]"' % release)
 
+def commit_feature_flags(release):
+    run('git commit -m "Update Documentation Feature Flags [%s]"' % release)
+
 def tag_release(release):
   run('git tag -a v%s -m "Tag release version %s"' % (release, release))
 
@@ -237,7 +242,8 @@ def build_release(run_tests=False, dry_run=True, cpus=1):
     run_mvn('clean',
             'test -Dtests.jvms=%s -Des.node.mode=local' % (cpus),
             'test -Dtests.jvms=%s -Des.node.mode=network' % (cpus))
-  run_mvn('clean %s -DskipTests' %(target))
+  run_mvn('clean test-compile -Dforbidden.test.signatures="org.apache.lucene.util.LuceneTestCase\$AwaitsFix @ Please fix all bugs before release"')
+  run_mvn('clean %s -DskipTests' % (target))
   success = False
   try:
     run_mvn('-DskipTests rpm:rpm')
@@ -251,7 +257,32 @@ def build_release(run_tests=False, dry_run=True, cpus=1):
     $ apt-get install rpm # on Ubuntu et.al
   """)
 
-
+# Uses the github API to fetch open tickets for the given release version
+# if it finds any tickets open for that version it will throw an exception
+def ensure_no_open_tickets(version):
+  version = "v%s" % version
+  conn = HTTPSConnection('api.github.com')
+  try:
+    log('Checking for open tickets on Github for version %s' % version)
+    log('Check if node is available')
+    conn.request('GET', '/repos/elasticsearch/elasticsearch/issues?state=open&labels=%s' % version, headers= {'User-Agent' : 'Elasticsearch version checker'})
+    res = conn.getresponse()
+    if res.status == 200:
+      issues = json.loads(res.read().decode("utf-8"))
+      if issues:
+        urls = []
+        for issue in issues:
+          urls.append(issue['url'])
+        raise RuntimeError('Found open issues  for release version %s see - %s' % (version, urls))
+      else:
+        log("No open issues found for version %s" % version)
+    else:
+      raise RuntimeError('Failed to fetch issue list from Github for release version %s' % version)
+  except socket.error as e:
+    log("Failed to fetch issue list from Github for release version %s' % version - Exception: [%s]" % (version, e))
+    #that is ok it might not be there yet
+  finally:
+    conn.close()
 
 def wait_for_node_startup(host='127.0.0.1', port=9200,timeout=15):
   for _ in range(timeout):
@@ -385,7 +416,7 @@ def smoke_test_release(release, files, expected_hash, plugins):
           if version['build_hash'].strip() !=  expected_hash:
             raise RuntimeError('HEAD hash does not match expected [%s] but got [%s]' % (expected_hash, version['build_hash']))
           print('  Running REST Spec tests against package [%s]' % release_file)
-          run_mvn('test -Dtests.rest=%s -Dtests.class=*.*RestTests' % ("127.0.0.1:9200"))
+          run_mvn('test -Dtests.cluster=%s -Dtests.class=*.*RestTests' % ("127.0.0.1:9300"))
           print('  Verify if plugins are listed in _nodes')
           conn.request('GET', '/_nodes?plugin=true&pretty=true')
           res = conn.getresponse()
@@ -513,6 +544,7 @@ if __name__ == '__main__':
 
   if build:
     release_version = find_release_version(src_branch)
+    ensure_no_open_tickets(release_version)
     if not dry_run:
       smoke_test_version = release_version
     head_hash = get_head_hash()
@@ -525,10 +557,16 @@ if __name__ == '__main__':
       pending_files = [POM_FILE, VERSION_FILE]
       remove_maven_snapshot(POM_FILE, release_version)
       remove_version_snapshot(VERSION_FILE, release_version)
-      pending_files = pending_files + update_reference_docs(release_version)
       print('  Done removing snapshot version')
       add_pending_files(*pending_files) # expects var args use * to expand
       commit_release(release_version)
+      pending_files = update_reference_docs(release_version)
+      version_head_hash = None
+      # split commits for docs and version to enable easy cherry-picking
+      if pending_files:
+        add_pending_files(*pending_files) # expects var args use * to expand
+        commit_feature_flags(release_version)
+        version_head_hash = get_head_hash()
       print('  Committed release version [%s]' % release_version)
       print(''.join(['-' for _ in range(80)]))
       print('Building Release candidate')
@@ -548,6 +586,9 @@ if __name__ == '__main__':
       merge_tag_push(remote, src_branch, release_version, dry_run)
       print('  publish artifacts to S3 -- dry_run: %s' % dry_run)
       publish_artifacts(artifacts_and_checksum, dry_run=dry_run)
+      cherry_pick_command = '.'
+      if version_head_hash:
+        cherry_pick_command = ' and cherry-pick the documentation changes: \'git cherry-pick %s\' to the development branch' % (version_head_hash)
       pending_msg = """
       Release successful pending steps:
         * create a version tag on github for version 'v%(version)s'
@@ -558,8 +599,9 @@ if __name__ == '__main__':
         * announce the release on the website / blog post
         * tweet about the release
         * announce the release in the google group/mailinglist
+        * Move to a Snapshot version to the current branch for the next point release%(cherry_pick)s
       """
-      print(pending_msg % { 'version' : release_version} )
+      print(pending_msg % { 'version' : release_version, 'cherry_pick' : cherry_pick_command} )
       success = True
     finally:
       if not success:

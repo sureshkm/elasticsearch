@@ -33,8 +33,7 @@ import java.util.concurrent.ExecutionException;
 import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
 import static org.elasticsearch.index.query.QueryBuilders.boolQuery;
 import static org.elasticsearch.index.query.QueryBuilders.rangeQuery;
-import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertHitCount;
-import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertNoFailures;
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.*;
 
 public class SimpleSearchTests extends ElasticsearchIntegrationTest {
 
@@ -57,7 +56,7 @@ public class SimpleSearchTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void testSearchRandomPreference() throws InterruptedException, ExecutionException {
-        client().admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards", between(1, 3))).get();
+        createIndex("test");
         indexRandom(true, client().prepareIndex("test", "type", "1").setSource("field", "value"),
                 client().prepareIndex("test", "type", "2").setSource("field", "value"),
                 client().prepareIndex("test", "type", "3").setSource("field", "value"),
@@ -65,7 +64,7 @@ public class SimpleSearchTests extends ElasticsearchIntegrationTest {
                 client().prepareIndex("test", "type", "5").setSource("field", "value"),
                 client().prepareIndex("test", "type", "6").setSource("field", "value"));
 
-        int iters = atLeast(10);
+        int iters = scaledRandomIntBetween(10, 20);
         for (int i = 0; i < iters; i++) {
             // id is not indexed, but lets see that we automatically convert to
             SearchResponse searchResponse = client().prepareSearch().setQuery(QueryBuilders.matchAllQuery()).setPreference(randomUnicodeOfLengthBetween(0, 4)).get();
@@ -76,7 +75,7 @@ public class SimpleSearchTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void simpleIpTests() throws Exception {
-        client().admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards", 1)).execute().actionGet();
+        createIndex("test");
 
         client().admin().indices().preparePutMapping("test").setType("type1")
                 .setSource(XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("properties")
@@ -96,7 +95,7 @@ public class SimpleSearchTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void simpleIdTests() {
-        client().admin().indices().prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards", 1)).execute().actionGet();
+        createIndex("test");
 
         client().prepareIndex("test", "type", "XXX1").setSource("field", "value").setRefresh(true).execute().actionGet();
         // id is not indexed, but lets see that we automatically convert to
@@ -116,10 +115,10 @@ public class SimpleSearchTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void simpleDateRangeWithUpperInclusiveEnabledTests() throws Exception {
-        prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder()).execute().actionGet();
+        createIndex("test");
         client().prepareIndex("test", "type1", "1").setSource("field", "2010-01-05T02:00").execute().actionGet();
         client().prepareIndex("test", "type1", "2").setSource("field", "2010-01-06T02:00").execute().actionGet();
-        client().admin().indices().prepareRefresh().execute().actionGet();
+        refresh();
 
         // test include upper on ranges to include the full day on the upper bound
         SearchResponse searchResponse = client().prepareSearch("test").setQuery(QueryBuilders.rangeQuery("field").gte("2010-01-05").lte("2010-01-06")).execute().actionGet();
@@ -130,7 +129,9 @@ public class SimpleSearchTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void simpleDateRangeWithUpperInclusiveDisabledTests() throws Exception {
-        prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder().put("index.mapping.date.round_ceil", false)).execute().actionGet();
+        assertAcked(prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder()
+                .put(indexSettings())
+                .put("index.mapping.date.round_ceil", false)));
         client().prepareIndex("test", "type1", "1").setSource("field", "2010-01-05T02:00").execute().actionGet();
         client().prepareIndex("test", "type1", "2").setSource("field", "2010-01-06T02:00").execute().actionGet();
         ensureGreen();
@@ -145,7 +146,7 @@ public class SimpleSearchTests extends ElasticsearchIntegrationTest {
 
     @Test @TestLogging("action.search.type:TRACE,action.admin.indices.refresh:TRACE")
     public void simpleDateMathTests() throws Exception {
-        prepareCreate("test").setSettings(ImmutableSettings.settingsBuilder()).execute().actionGet();
+        createIndex("test");
         client().prepareIndex("test", "type1", "1").setSource("field", "2010-01-05T02:00").execute().actionGet();
         client().prepareIndex("test", "type1", "2").setSource("field", "2010-01-06T02:00").execute().actionGet();
         ensureGreen();
@@ -160,7 +161,7 @@ public class SimpleSearchTests extends ElasticsearchIntegrationTest {
     
     @Test
     public void localDependentDateTests() throws Exception {
-        prepareCreate("test")
+        assertAcked(prepareCreate("test")
                 .addMapping("type1",
                         jsonBuilder().startObject()
                                 .startObject("type1")
@@ -172,15 +173,14 @@ public class SimpleSearchTests extends ElasticsearchIntegrationTest {
                                 .endObject()
                                 .endObject()
                                 .endObject()
-                                .endObject())
-                .execute().actionGet();
+                                .endObject()));
         ensureGreen();
         for (int i = 0; i < 10; i++) {
             client().prepareIndex("test", "type1", "" + i).setSource("date_field", "Mi, 06 Dez 2000 02:55:00 -0800").execute().actionGet();
             client().prepareIndex("test", "type1", "" + (10 + i)).setSource("date_field", "Do, 07 Dez 2000 02:55:00 -0800").execute().actionGet();
         }
 
-        client().admin().indices().prepareRefresh().execute().actionGet();
+        refresh();
         for (int i = 0; i < 10; i++) {
             SearchResponse searchResponse = client().prepareSearch("test")
                     .setQuery(QueryBuilders.rangeQuery("date_field").gte("Di, 05 Dez 2000 02:55:00 -0800").lte("Do, 07 Dez 2000 00:00:00 -0800"))

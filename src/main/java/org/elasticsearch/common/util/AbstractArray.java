@@ -19,25 +19,26 @@
 
 package org.elasticsearch.common.util;
 
-import org.elasticsearch.cache.recycler.PageCacheRecycler;
-import org.elasticsearch.common.lease.Releasable;
 
-abstract class AbstractArray implements Releasable {
+abstract class AbstractArray implements BigArray {
 
-    public final PageCacheRecycler recycler;
+    private final BigArrays bigArrays;
     public final boolean clearOnResize;
     private boolean released = false;
 
-    AbstractArray(PageCacheRecycler recycler, boolean clearOnResize) {
-        this.recycler = recycler;
+    AbstractArray(BigArrays bigArrays, boolean clearOnResize) {
+        this.bigArrays = bigArrays;
         this.clearOnResize = clearOnResize;
     }
 
     @Override
-    public boolean release() {
+    public final void close() {
+        bigArrays.ramBytesUsed.addAndGet(-sizeInBytes());
         assert !released : "double release";
         released = true;
-        return true; // nothing to release by default
+        doClose();
     }
+
+    protected abstract void doClose();
 
 }

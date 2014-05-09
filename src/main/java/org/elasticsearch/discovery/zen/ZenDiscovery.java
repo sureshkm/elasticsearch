@@ -19,6 +19,7 @@
 
 package org.elasticsearch.discovery.zen;
 
+import com.google.common.base.Objects;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import org.elasticsearch.ElasticsearchException;
@@ -43,6 +44,7 @@ import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
+import org.elasticsearch.common.util.concurrent.ConcurrentCollections;
 import org.elasticsearch.discovery.Discovery;
 import org.elasticsearch.discovery.DiscoveryService;
 import org.elasticsearch.discovery.DiscoverySettings;
@@ -64,6 +66,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -102,7 +105,7 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
 
     private DiscoveryNode localNode;
 
-    private final CopyOnWriteArrayList<InitialStateDiscoveryListener> initialStateListeners = new CopyOnWriteArrayList<InitialStateDiscoveryListener>();
+    private final CopyOnWriteArrayList<InitialStateDiscoveryListener> initialStateListeners = new CopyOnWriteArrayList<>();
 
     private volatile boolean master = false;
 
@@ -367,7 +370,7 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
             return;
         }
         if (master) {
-            clusterService.submitStateUpdateTask("zen-disco-node_left(" + node + ")", Priority.URGENT, new ClusterStateUpdateTask() {
+            clusterService.submitStateUpdateTask("zen-disco-node_left(" + node + ")", Priority.IMMEDIATE, new ClusterStateUpdateTask() {
                 @Override
                 public ClusterState execute(ClusterState currentState) {
                     DiscoveryNodes.Builder builder = DiscoveryNodes.builder(currentState.nodes()).remove(node.id());
@@ -401,7 +404,7 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
             // nothing to do here...
             return;
         }
-        clusterService.submitStateUpdateTask("zen-disco-node_failed(" + node + "), reason " + reason, Priority.URGENT, new ProcessedClusterStateUpdateTask() {
+        clusterService.submitStateUpdateTask("zen-disco-node_failed(" + node + "), reason " + reason, Priority.IMMEDIATE, new ProcessedClusterStateUpdateTask() {
             @Override
             public ClusterState execute(ClusterState currentState) {
                 DiscoveryNodes.Builder builder = DiscoveryNodes.builder(currentState.nodes())
@@ -434,15 +437,15 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
             // not started, ignore a node failure
             return;
         }
+        final int prevMinimumMasterNode = ZenDiscovery.this.electMaster.minimumMasterNodes();
+        ZenDiscovery.this.electMaster.minimumMasterNodes(minimumMasterNodes);
         if (!master) {
-            // nothing to do here...
+            // We only set the new value. If the master doesn't see enough nodes it will revoke it's mastership.
             return;
         }
-        clusterService.submitStateUpdateTask("zen-disco-minimum_master_nodes_changed", Priority.URGENT, new ProcessedClusterStateUpdateTask() {
+        clusterService.submitStateUpdateTask("zen-disco-minimum_master_nodes_changed", Priority.IMMEDIATE, new ProcessedClusterStateUpdateTask() {
             @Override
             public ClusterState execute(ClusterState currentState) {
-                final int prevMinimumMasterNode = ZenDiscovery.this.electMaster.minimumMasterNodes();
-                ZenDiscovery.this.electMaster.minimumMasterNodes(minimumMasterNodes);
                 // check if we have enough master nodes, if not, we need to move into joining the cluster again
                 if (!electMaster.hasEnoughMasterNodes(currentState.nodes())) {
                     return rejoin(currentState, "not enough master nodes on change of minimum_master_nodes from [" + prevMinimumMasterNode + "] to [" + minimumMasterNodes + "]");
@@ -474,7 +477,7 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
 
         logger.info("master_left [{}], reason [{}]", masterNode, reason);
 
-        clusterService.submitStateUpdateTask("zen-disco-master_failed (" + masterNode + ")", Priority.URGENT, new ProcessedClusterStateUpdateTask() {
+        clusterService.submitStateUpdateTask("zen-disco-master_failed (" + masterNode + ")", Priority.IMMEDIATE, new ProcessedClusterStateUpdateTask() {
             @Override
             public ClusterState execute(ClusterState currentState) {
                 if (!masterNode.id().equals(currentState.nodes().masterNodeId())) {
@@ -527,8 +530,30 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
         });
     }
 
-    void handleNewClusterStateFromMaster(final ClusterState newState, final PublishClusterStateAction.NewClusterStateListener.NewStateProcessed newStateProcessed) {
+    static class ProcessClusterState {
+        final ClusterState clusterState;
+        final PublishClusterStateAction.NewClusterStateListener.NewStateProcessed newStateProcessed;
+        volatile boolean processed;
+
+        ProcessClusterState(ClusterState clusterState, PublishClusterStateAction.NewClusterStateListener.NewStateProcessed newStateProcessed) {
+            this.clusterState = clusterState;
+            this.newStateProcessed = newStateProcessed;
+        }
+    }
+
+    private final BlockingQueue<ProcessClusterState> processNewClusterStates = ConcurrentCollections.newBlockingQueue();
+
+    void handleNewClusterStateFromMaster(ClusterState newClusterState, final PublishClusterStateAction.NewClusterStateListener.NewStateProcessed newStateProcessed) {
+        final ClusterName incomingClusterName = newClusterState.getClusterName();
+        /* The cluster name can still be null if the state comes from a node that is prev 1.1.1*/
+        if (incomingClusterName != null && !incomingClusterName.equals(this.clusterName)) {
+            logger.warn("received cluster state from [{}] which is also master but with a different cluster name [{}]", newClusterState.nodes().masterNode(), incomingClusterName);
+            newStateProcessed.onNewClusterStateFailed(new ElasticsearchIllegalStateException("received state from a node that is not part of the cluster"));
+            return;
+        }
         if (master) {
+            logger.debug("received cluster state from [{}] which is also master but with cluster name [{}]",  newClusterState.nodes().masterNode(), incomingClusterName);
+            final ClusterState newState = newClusterState;
             clusterService.submitStateUpdateTask("zen-disco-master_receive_cluster_state_from_another_master [" + newState.nodes().masterNode() + "]", Priority.URGENT, new ProcessedClusterStateUpdateTask() {
                 @Override
                 public ClusterState execute(ClusterState currentState) {
@@ -560,17 +585,63 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
 
             });
         } else {
-            if (newState.nodes().localNode() == null) {
-                logger.warn("received a cluster state from [{}] and not part of the cluster, should not happen", newState.nodes().masterNode());
+            if (newClusterState.nodes().localNode() == null) {
+                logger.warn("received a cluster state from [{}] and not part of the cluster, should not happen", newClusterState.nodes().masterNode());
                 newStateProcessed.onNewClusterStateFailed(new ElasticsearchIllegalStateException("received state from a node that is not part of the cluster"));
             } else {
                 if (currentJoinThread != null) {
                     logger.debug("got a new state from master node, though we are already trying to rejoin the cluster");
                 }
 
-                clusterService.submitStateUpdateTask("zen-disco-receive(from master [" + newState.nodes().masterNode() + "])", Priority.URGENT, new ProcessedClusterStateUpdateTask() {
+                final ProcessClusterState processClusterState = new ProcessClusterState(newClusterState, newStateProcessed);
+                processNewClusterStates.add(processClusterState);
+
+                clusterService.submitStateUpdateTask("zen-disco-receive(from master [" + newClusterState.nodes().masterNode() + "])", Priority.URGENT, new ProcessedClusterStateUpdateTask() {
                     @Override
                     public ClusterState execute(ClusterState currentState) {
+                        // we already processed it in a previous event
+                        if (processClusterState.processed) {
+                            return currentState;
+                        }
+
+                        // TODO: once improvement that we can do is change the message structure to include version and masterNodeId
+                        // at the start, this will allow us to keep the "compressed bytes" around, and only parse the first page
+                        // to figure out if we need to use it or not, and only once we picked the latest one, parse the whole state
+
+
+                        // try and get the state with the highest version out of all the ones with the same master node id
+                        ProcessClusterState stateToProcess = processNewClusterStates.poll();
+                        if (stateToProcess == null) {
+                            return currentState;
+                        }
+                        stateToProcess.processed = true;
+                        while (true) {
+                            ProcessClusterState potentialState = processNewClusterStates.peek();
+                            // nothing else in the queue, bail
+                            if (potentialState == null) {
+                                break;
+                            }
+                            // if its not from the same master, then bail
+                            if (!Objects.equal(stateToProcess.clusterState.nodes().masterNodeId(), potentialState.clusterState.nodes().masterNodeId())) {
+                                break;
+                            }
+
+                            // we are going to use it for sure, poll (remove) it
+                            potentialState = processNewClusterStates.poll();
+                            potentialState.processed = true;
+
+                            if (potentialState.clusterState.version() > stateToProcess.clusterState.version()) {
+                                // we found a new one
+                                stateToProcess = potentialState;
+                            }
+                        }
+
+                        ClusterState updatedState = stateToProcess.clusterState;
+
+                        // if the new state has a smaller version, and it has the same master node, then no need to process it
+                        if (updatedState.version() < currentState.version() && Objects.equal(updatedState.nodes().masterNodeId(), currentState.nodes().masterNodeId())) {
+                            return currentState;
+                        }
 
                         // we don't need to do this, since we ping the master, and get notified when it has moved from being a master
                         // because it doesn't have enough master nodes...
@@ -578,25 +649,25 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
                         //    return disconnectFromCluster(newState, "not enough master nodes on new cluster state received from [" + newState.nodes().masterNode() + "]");
                         //}
 
-                        latestDiscoNodes = newState.nodes();
+                        latestDiscoNodes = updatedState.nodes();
 
                         // check to see that we monitor the correct master of the cluster
                         if (masterFD.masterNode() == null || !masterFD.masterNode().equals(latestDiscoNodes.masterNode())) {
                             masterFD.restart(latestDiscoNodes.masterNode(), "new cluster state received and we are monitoring the wrong master [" + masterFD.masterNode() + "]");
                         }
 
-                        ClusterState.Builder builder = ClusterState.builder(newState);
+                        ClusterState.Builder builder = ClusterState.builder(updatedState);
                         // if the routing table did not change, use the original one
-                        if (newState.routingTable().version() == currentState.routingTable().version()) {
+                        if (updatedState.routingTable().version() == currentState.routingTable().version()) {
                             builder.routingTable(currentState.routingTable());
                         }
                         // same for metadata
-                        if (newState.metaData().version() == currentState.metaData().version()) {
+                        if (updatedState.metaData().version() == currentState.metaData().version()) {
                             builder.metaData(currentState.metaData());
                         } else {
                             // if its not the same version, only copy over new indices or ones that changed the version
-                            MetaData.Builder metaDataBuilder = MetaData.builder(newState.metaData()).removeAllIndices();
-                            for (IndexMetaData indexMetaData : newState.metaData()) {
+                            MetaData.Builder metaDataBuilder = MetaData.builder(updatedState.metaData()).removeAllIndices();
+                            for (IndexMetaData indexMetaData : updatedState.metaData()) {
                                 IndexMetaData currentIndexMetaData = currentState.metaData().index(indexMetaData.index());
                                 if (currentIndexMetaData == null || currentIndexMetaData.version() != indexMetaData.version()) {
                                     metaDataBuilder.put(indexMetaData, false);
@@ -644,7 +715,7 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
             // node calling the join request
             membership.sendValidateJoinRequestBlocking(node, state, pingTimeout);
 
-            clusterService.submitStateUpdateTask("zen-disco-receive(join from node[" + node + "])", Priority.URGENT, new ClusterStateUpdateTask() {
+            clusterService.submitStateUpdateTask("zen-disco-receive(join from node[" + node + "])", Priority.IMMEDIATE, new ClusterStateUpdateTask() {
                 @Override
                 public ClusterState execute(ClusterState currentState) {
                     if (currentState.nodes().nodeExists(node.id())) {
@@ -895,9 +966,11 @@ public class ZenDiscovery extends AbstractLifecycleComponent<Discovery> implemen
     class ApplySettings implements NodeSettingsService.Listener {
         @Override
         public void onRefreshSettings(Settings settings) {
-            int minimumMasterNodes = settings.getAsInt("discovery.zen.minimum_master_nodes", ZenDiscovery.this.electMaster.minimumMasterNodes());
+            int minimumMasterNodes = settings.getAsInt(ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES,
+                    ZenDiscovery.this.electMaster.minimumMasterNodes());
             if (minimumMasterNodes != ZenDiscovery.this.electMaster.minimumMasterNodes()) {
-                logger.info("updating discovery.zen.minimum_master_nodes from [{}] to [{}]", ZenDiscovery.this.electMaster.minimumMasterNodes(), minimumMasterNodes);
+                logger.info("updating {} from [{}] to [{}]", ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES,
+                        ZenDiscovery.this.electMaster.minimumMasterNodes(), minimumMasterNodes);
                 handleMinimumMasterNodesChanged(minimumMasterNodes);
             }
         }

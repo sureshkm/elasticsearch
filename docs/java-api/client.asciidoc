@@ -17,7 +17,7 @@ get a client is by:
 within a cluster
 2.  requesting a `Client` from your embedded `Node`.
 
-Another manner is by creating a link:#transportclient[`TransportClient`]
+Another manner is by creating a link:#transport-client[`TransportClient`]
 that connects to a cluster.
 
 *Important:*
@@ -55,7 +55,7 @@ explicitly using the `clusterName` method on the builder.
 
 You can define `cluster.name` in `/src/main/resources/elasticsearch.yml`
 dir in your project. As long as `elasticsearch.yml` is present in the
-classloader, it will be used when you start your node.
+classpath, it will be used when you start your node.
 
 [source,java]
 --------------------------------------------------

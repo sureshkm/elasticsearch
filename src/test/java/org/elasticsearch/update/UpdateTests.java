@@ -241,11 +241,8 @@ public class UpdateTests extends ElasticsearchIntegrationTest {
         // external versioning
         client().prepareIndex("test", "type", "2").setSource("text", "value").setVersion(10).setVersionType(VersionType.EXTERNAL).get();
         assertThrows(client().prepareUpdate("test", "type", "2").setScript("ctx._source.text = 'v2'").setVersion(2).setVersionType(VersionType.EXTERNAL).execute(),
-                VersionConflictEngineException.class);
+                ActionRequestValidationException.class);
 
-        client().prepareUpdate("test", "type", "2").setScript("ctx._source.text = 'v2'").setVersion(11).setVersionType(VersionType.EXTERNAL).get();
-
-        assertThat(client().prepareGet("test", "type", "2").get().getVersion(), equalTo(11l));
 
         // upserts - the combination with versions is a bit weird. Test are here to ensure we do not change our behavior unintentionally
 
@@ -255,9 +252,9 @@ public class UpdateTests extends ElasticsearchIntegrationTest {
         assertThat(get.getVersion(), equalTo(1l));
         assertThat((String) get.getSource().get("text"), equalTo("v0"));
 
-        // With external versions, it means - if object is there with version lower than X, update it or explode. If it is not there, insert with new version.
+        // With force version
         client().prepareUpdate("test", "type", "4").setScript("ctx._source.text = 'v2'").
-                setVersion(10).setVersionType(VersionType.EXTERNAL).setUpsert("{ \"text\": \"v0\" }").get();
+                setVersion(10).setVersionType(VersionType.FORCE).setUpsert("{ \"text\": \"v0\" }").get();
         get = get("test", "type", "4");
         assertThat(get.getVersion(), equalTo(10l));
         assertThat((String) get.getSource().get("text"), equalTo("v0"));
@@ -384,9 +381,9 @@ public class UpdateTests extends ElasticsearchIntegrationTest {
         }
 
         // recursive map
-        Map<String, Object> testMap = new HashMap<String, Object>();
-        Map<String, Object> testMap2 = new HashMap<String, Object>();
-        Map<String, Object> testMap3 = new HashMap<String, Object>();
+        Map<String, Object> testMap = new HashMap<>();
+        Map<String, Object> testMap2 = new HashMap<>();
+        Map<String, Object> testMap3 = new HashMap<>();
         testMap3.put("commonkey", testMap);
         testMap3.put("map3", 5);
         testMap2.put("map2", 6);
@@ -452,16 +449,18 @@ public class UpdateTests extends ElasticsearchIntegrationTest {
         createIndex();
         ensureGreen();
 
-        int numberOfThreads = between(2,5);
+        int numberOfThreads = scaledRandomIntBetween(2,5);
         final CountDownLatch latch = new CountDownLatch(numberOfThreads);
-        final int numberOfUpdatesPerThread = between(1000, 10000);
-        final List<Throwable> failures = new CopyOnWriteArrayList<Throwable>();
+        final CountDownLatch startLatch = new CountDownLatch(1);
+        final int numberOfUpdatesPerThread = scaledRandomIntBetween(100, 10000);
+        final List<Throwable> failures = new CopyOnWriteArrayList<>();
         for (int i = 0; i < numberOfThreads; i++) {
             Runnable r = new Runnable() {
 
                 @Override
                 public void run() {
                     try {
+                        startLatch.await();
                         for (int i = 0; i < numberOfUpdatesPerThread; i++) {
                             if (useBulkApi) {
                                 UpdateRequestBuilder updateRequestBuilder = client().prepareUpdate("test", "type1", Integer.toString(i))
@@ -486,6 +485,7 @@ public class UpdateTests extends ElasticsearchIntegrationTest {
             };
             new Thread(r).start();
         }
+        startLatch.countDown();
         latch.await();
         for (Throwable throwable : failures) {
             logger.info("Captured failure on concurrent update:", throwable);

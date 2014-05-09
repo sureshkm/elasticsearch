@@ -41,8 +41,6 @@ import static org.elasticsearch.action.ValidateActions.addValidationError;
  */
 public class PercolateRequest extends BroadcastOperationRequest<PercolateRequest> {
 
-    public static final XContentType contentType = Requests.CONTENT_TYPE;
-
     private String documentType;
     private String routing;
     private String preference;
@@ -63,7 +61,6 @@ public class PercolateRequest extends BroadcastOperationRequest<PercolateRequest
 
     public PercolateRequest(PercolateRequest request, BytesReference docSource) {
         super(request.indices());
-        operationThreading(request.operationThreading());
         this.documentType = request.documentType();
         this.routing = request.routing();
         this.preference = request.preference();
@@ -123,7 +120,7 @@ public class PercolateRequest extends BroadcastOperationRequest<PercolateRequest
     }
 
     public PercolateRequest source(Map document) throws ElasticsearchGenerationException {
-        return source(document, contentType);
+        return source(document, Requests.CONTENT_TYPE);
     }
 
     public PercolateRequest source(Map document, XContentType contentType) throws ElasticsearchGenerationException {
@@ -167,7 +164,7 @@ public class PercolateRequest extends BroadcastOperationRequest<PercolateRequest
     }
 
     public PercolateRequest source(PercolateSourceBuilder sourceBuilder) {
-        this.source = sourceBuilder.buildAsBytes(contentType);
+        this.source = sourceBuilder.buildAsBytes(Requests.CONTENT_TYPE);
         this.unsafe = false;
         return this;
     }

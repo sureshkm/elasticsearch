@@ -28,17 +28,17 @@ import org.elasticsearch.rest.helper.HttpClient;
 import org.elasticsearch.rest.helper.HttpClientResponse;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
 import org.elasticsearch.test.ElasticsearchIntegrationTest.ClusterScope;
-import org.elasticsearch.test.ElasticsearchIntegrationTest.Scope;
 import org.junit.Test;
 
 import java.util.Map;
 
+import static org.elasticsearch.test.ElasticsearchIntegrationTest.*;
 import static org.hamcrest.Matchers.equalTo;
 
 /**
  * Test a rest action that sets special response headers
  */
-@ClusterScope(scope = Scope.SUITE, numNodes = 1)
+@ClusterScope(scope = Scope.SUITE, numDataNodes = 1)
 public class ResponseHeaderPluginTests extends ElasticsearchIntegrationTest {
 
     @Override
@@ -65,7 +65,7 @@ public class ResponseHeaderPluginTests extends ElasticsearchIntegrationTest {
     }
 
     private HttpClient httpClient() {
-        HttpServerTransport httpServerTransport = cluster().getInstance(HttpServerTransport.class);
+        HttpServerTransport httpServerTransport = cluster().getDataNodeInstance(HttpServerTransport.class);
         return new HttpClient(httpServerTransport.boundAddress().publishAddress());
     }
 }

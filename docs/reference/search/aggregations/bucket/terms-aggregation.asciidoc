@@ -144,6 +144,46 @@ Ordering the buckets by multi value metrics sub-aggregation (identified by the a
 }
 --------------------------------------------------
 
+It is also possible to order the buckets based on a "deeper" aggregation in the hierarchy. This is supported as long
+as the aggregations path are of a single-bucket type, where the last aggregation in the path may either by a single-bucket
+one or a metrics one. If it's a single-bucket type, the order will be defined by the number of docs in the bucket (i.e. `doc_count`),
+in case it's a metrics one, the same rules as above apply (where the path must indicate the metric name to sort by in case of
+a multi-value metrics aggregation, and in case of a single-value metrics aggregation the sort will be applied on that value).
+
+The path must be defined in the following form:
+
+--------------------------------------------------
+AGG_SEPARATOR       :=  '>'
+METRIC_SEPARATOR    :=  '.'
+AGG_NAME            :=  <the name of the aggregation>
+METRIC              :=  <the name of the metric (in case of multi-value metrics aggregation)>
+PATH                :=  <AGG_NAME>[<AGG_SEPARATOR><AGG_NAME>]*[<METRIC_SEPARATOR><METRIC>]
+--------------------------------------------------
+
+[source,js]
+--------------------------------------------------
+{
+    "aggs" : {
+        "countries" : {
+            "terms" : {
+                "field" : "address.country",
+                "order" : { "females>height_stats.avg" : "desc" }
+            },
+            "aggs" : {
+                "females" : {
+                    "filter" : { "term" : { "gender" : { "female" }}},
+                    "aggs" : {
+                        "height_stats" : { "stats" : { "field" : "height" }}
+                    }
+                }
+            }
+        }
+    }
+}
+--------------------------------------------------
+
+The above will sort the countries buckets based on the average height among the female population.
+
 ==== Minimum document count
 
 It is possible to only return terms that match more than a configured number of hits using the `min_doc_count` option:
@@ -270,12 +310,15 @@ http://docs.oracle.com/javase/7/docs/api/java/util/regex/Pattern.html#UNIX_LINES
 
 ==== Execution hint
 
-There are two mechanisms by which terms aggregations can be executed: either by using field values directly in order to aggregate
-data per-bucket (`map`), or by using ordinals of the field values instead of the values themselves (`ordinals`). Although the
-latter execution mode can be expected to be slightly faster, it is only available for use when the underlying data source exposes
-those terms ordinals. Moreover, it may actually be slower if most field values are unique. Elasticsearch tries to have sensible
-defaults when it comes to the execution mode that should be used, but in case you know that one execution mode may perform better
-than the other one, you have the ability to "hint" it to Elasticsearch:
+coming[1.2.0] The `global_ordinals` execution mode
+
+There are three mechanisms by which terms aggregations can be executed: either by using field values directly in order to aggregate
+data per-bucket (`map`), by using ordinals of the field values instead of the values themselves (`ordinals`) or by using global
+ordinals of the field (`global_ordinals`). The latter is faster, especially for fields with many unique
+values. However it can be slower if only a few documents match, when for example a terms aggregator is nested in another
+aggregator, this applies for both `ordinals` and `global_ordinals` execution modes. Elasticsearch tries to have sensible
+defaults when it comes to the execution mode that should be used, but  in case you know that one execution mode may
+perform better than the other one, you have the ability to "hint" it to Elasticsearch:
 
 [source,js]
 --------------------------------------------------
@@ -291,6 +334,6 @@ than the other one, you have the ability to "hint" it to Elasticsearch:
 }
 --------------------------------------------------
 
-<1> the possible values are `map` and `ordinals`
+<1> the possible values are `map`, `ordinals` and `global_ordinals`
 
 Please note that Elasticsearch will ignore this execution hint if it is not applicable.

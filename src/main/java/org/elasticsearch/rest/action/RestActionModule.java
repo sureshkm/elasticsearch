@@ -40,6 +40,7 @@ import org.elasticsearch.rest.action.admin.cluster.snapshots.create.RestCreateSn
 import org.elasticsearch.rest.action.admin.cluster.snapshots.delete.RestDeleteSnapshotAction;
 import org.elasticsearch.rest.action.admin.cluster.snapshots.get.RestGetSnapshotsAction;
 import org.elasticsearch.rest.action.admin.cluster.snapshots.restore.RestRestoreSnapshotAction;
+import org.elasticsearch.rest.action.admin.cluster.snapshots.status.RestSnapshotsStatusAction;
 import org.elasticsearch.rest.action.admin.cluster.state.RestClusterStateAction;
 import org.elasticsearch.rest.action.admin.cluster.stats.RestClusterStatsAction;
 import org.elasticsearch.rest.action.admin.cluster.tasks.RestPendingClusterTasksAction;
@@ -57,7 +58,6 @@ import org.elasticsearch.rest.action.admin.indices.delete.RestDeleteIndexAction;
 import org.elasticsearch.rest.action.admin.indices.exists.indices.RestIndicesExistsAction;
 import org.elasticsearch.rest.action.admin.indices.exists.types.RestTypesExistsAction;
 import org.elasticsearch.rest.action.admin.indices.flush.RestFlushAction;
-import org.elasticsearch.rest.action.admin.indices.gateway.snapshot.RestGatewaySnapshotAction;
 import org.elasticsearch.rest.action.admin.indices.mapping.delete.RestDeleteMappingAction;
 import org.elasticsearch.rest.action.admin.indices.mapping.get.RestGetFieldMappingAction;
 import org.elasticsearch.rest.action.admin.indices.mapping.get.RestGetMappingAction;
@@ -69,7 +69,6 @@ import org.elasticsearch.rest.action.admin.indices.segments.RestIndicesSegmentsA
 import org.elasticsearch.rest.action.admin.indices.settings.RestGetSettingsAction;
 import org.elasticsearch.rest.action.admin.indices.settings.RestUpdateSettingsAction;
 import org.elasticsearch.rest.action.admin.indices.stats.RestIndicesStatsAction;
-import org.elasticsearch.rest.action.admin.indices.status.RestIndicesStatusAction;
 import org.elasticsearch.rest.action.admin.indices.template.delete.RestDeleteIndexTemplateAction;
 import org.elasticsearch.rest.action.admin.indices.template.get.RestGetIndexTemplateAction;
 import org.elasticsearch.rest.action.admin.indices.template.head.RestHeadIndexTemplateAction;
@@ -78,6 +77,8 @@ import org.elasticsearch.rest.action.admin.indices.validate.query.RestValidateQu
 import org.elasticsearch.rest.action.admin.indices.warmer.delete.RestDeleteWarmerAction;
 import org.elasticsearch.rest.action.admin.indices.warmer.get.RestGetWarmerAction;
 import org.elasticsearch.rest.action.admin.indices.warmer.put.RestPutWarmerAction;
+import org.elasticsearch.rest.action.admin.indices.recovery.RestRecoveryAction;
+import org.elasticsearch.rest.action.bench.RestBenchAction;
 import org.elasticsearch.rest.action.bulk.RestBulkAction;
 import org.elasticsearch.rest.action.cat.*;
 import org.elasticsearch.rest.action.delete.RestDeleteAction;
@@ -141,11 +142,11 @@ public class RestActionModule extends AbstractModule {
         bind(RestCreateSnapshotAction.class).asEagerSingleton();
         bind(RestRestoreSnapshotAction.class).asEagerSingleton();
         bind(RestDeleteSnapshotAction.class).asEagerSingleton();
+        bind(RestSnapshotsStatusAction.class).asEagerSingleton();
 
         bind(RestIndicesExistsAction.class).asEagerSingleton();
         bind(RestTypesExistsAction.class).asEagerSingleton();
         bind(RestIndicesStatsAction.class).asEagerSingleton();
-        bind(RestIndicesStatusAction.class).asEagerSingleton();
         bind(RestIndicesSegmentsAction.class).asEagerSingleton();
         bind(RestGetAliasesAction.class).asEagerSingleton();
         bind(RestAliasesExistAction.class).asEagerSingleton();
@@ -175,8 +176,6 @@ public class RestActionModule extends AbstractModule {
         bind(RestDeleteMappingAction.class).asEagerSingleton();
         bind(RestGetMappingAction.class).asEagerSingleton();
         bind(RestGetFieldMappingAction.class).asEagerSingleton();
-
-        bind(RestGatewaySnapshotAction.class).asEagerSingleton();
 
         bind(RestRefreshAction.class).asEagerSingleton();
         bind(RestFlushAction.class).asEagerSingleton();
@@ -210,6 +209,10 @@ public class RestActionModule extends AbstractModule {
 
         bind(RestExplainAction.class).asEagerSingleton();
 
+        bind(RestRecoveryAction.class).asEagerSingleton();
+        // Benchmark API
+        bind(RestBenchAction.class).asEagerSingleton();
+
         // cat API
         Multibinder<AbstractCatAction> catActionMultibinder = Multibinder.newSetBinder(binder(), AbstractCatAction.class);
         catActionMultibinder.addBinding().to(RestAllocationAction.class).asEagerSingleton();
@@ -217,13 +220,16 @@ public class RestActionModule extends AbstractModule {
         catActionMultibinder.addBinding().to(RestMasterAction.class).asEagerSingleton();
         catActionMultibinder.addBinding().to(RestNodesAction.class).asEagerSingleton();
         catActionMultibinder.addBinding().to(RestIndicesAction.class).asEagerSingleton();
+        catActionMultibinder.addBinding().to(RestSegmentsAction.class).asEagerSingleton();
         // Fully qualified to prevent interference with rest.action.count.RestCountAction
         catActionMultibinder.addBinding().to(org.elasticsearch.rest.action.cat.RestCountAction.class).asEagerSingleton();
-        catActionMultibinder.addBinding().to(RestRecoveryAction.class).asEagerSingleton();
+        // Fully qualified to prevent interference with rest.action.indices.RestRecoveryAction
+        catActionMultibinder.addBinding().to(org.elasticsearch.rest.action.cat.RestRecoveryAction.class).asEagerSingleton();
         catActionMultibinder.addBinding().to(RestHealthAction.class).asEagerSingleton();
         catActionMultibinder.addBinding().to(org.elasticsearch.rest.action.cat.RestPendingClusterTasksAction.class).asEagerSingleton();
         catActionMultibinder.addBinding().to(RestAliasAction.class).asEagerSingleton();
         catActionMultibinder.addBinding().to(RestThreadPoolAction.class).asEagerSingleton();
+        catActionMultibinder.addBinding().to(RestPluginsAction.class).asEagerSingleton();
         // no abstract cat action
         bind(RestCatAction.class).asEagerSingleton();
     }

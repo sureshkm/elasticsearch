@@ -43,7 +43,7 @@ Individual fields can be boosted with the caret (`^`) notation:
   }
 }
 --------------------------------------------------
-<1> The `subject` field is three times as important than the `message` field.
+<1> The `subject` field is three times as important as the `message` field.
 
 [float]
 === `use_dis_max`
@@ -58,7 +58,7 @@ in a `dis_max` query.  By setting `use_dis_max` to `false`, they will be wrapped
 [float]
 === Types of `multi_match` query:
 
-coming[1.1.0]
+added[1.1.0]
 
 The way the `multi_match` query is executed internally depends on the `type`
 parameter, which can be set to:
@@ -383,7 +383,7 @@ parameter to just one of them:
                 "query":      "Will Smith",
                 "type":       "cross_fields",
                 "fields":     [ "first", "last" ],
-                "minimum_should_match": 50% <1>
+                "minimum_should_match": "50%" <1>
               }
             },
             {

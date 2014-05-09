@@ -288,7 +288,7 @@ public class JvmInfo implements Streamable, Serializable, ToXContent {
         builder.field(Fields.VM_NAME, vmName);
         builder.field(Fields.VM_VERSION, vmVersion);
         builder.field(Fields.VM_VENDOR, vmVendor);
-        builder.field(Fields.START_TIME, startTime);
+        builder.dateValueField(Fields.START_TIME_IN_MILLIS, Fields.START_TIME, startTime);
 
         builder.startObject(Fields.MEM);
         builder.byteSizeField(Fields.HEAP_INIT_IN_BYTES, Fields.HEAP_INIT, mem.heapInit);
@@ -313,6 +313,7 @@ public class JvmInfo implements Streamable, Serializable, ToXContent {
         static final XContentBuilderString VM_VERSION = new XContentBuilderString("vm_version");
         static final XContentBuilderString VM_VENDOR = new XContentBuilderString("vm_vendor");
         static final XContentBuilderString START_TIME = new XContentBuilderString("start_time");
+        static final XContentBuilderString START_TIME_IN_MILLIS = new XContentBuilderString("start_time_in_millis");
 
         static final XContentBuilderString MEM = new XContentBuilderString("mem");
         static final XContentBuilderString HEAP_INIT = new XContentBuilderString("heap_init");
@@ -349,7 +350,7 @@ public class JvmInfo implements Streamable, Serializable, ToXContent {
         }
         bootClassPath = in.readString();
         classPath = in.readString();
-        systemProperties = new HashMap<String, String>();
+        systemProperties = new HashMap<>();
         int size = in.readInt();
         for (int i = 0; i < size; i++) {
             systemProperties.put(in.readString(), in.readString());

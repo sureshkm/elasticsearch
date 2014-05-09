@@ -32,14 +32,18 @@ import java.util.Arrays;
 /** Common implementation for array lists that slice data into fixed-size blocks. */
 abstract class AbstractBigArray extends AbstractArray {
 
+    private static final long EMPTY_SIZE = RamUsageEstimator.shallowSizeOfInstance(AbstractBigArray.class) + RamUsageEstimator.NUM_BYTES_OBJECT_REF + RamUsageEstimator.NUM_BYTES_ARRAY_HEADER;
+
+    private final PageCacheRecycler recycler;
     private Recycler.V<?>[] cache;
 
     private final int pageShift;
     private final int pageMask;
     protected long size;
 
-    protected AbstractBigArray(int pageSize, PageCacheRecycler recycler, boolean clearOnResize) {
-        super(recycler, clearOnResize);
+    protected AbstractBigArray(int pageSize, BigArrays bigArrays, boolean clearOnResize) {
+        super(bigArrays, clearOnResize);
+        this.recycler = bigArrays.recycler;
         Preconditions.checkArgument(pageSize >= 128, "pageSize must be >= 128");
         Preconditions.checkArgument((pageSize & (pageSize - 1)) == 0, "pageSize must be a power of two");
         this.pageShift = Integer.numberOfTrailingZeros(pageSize);
@@ -73,6 +77,8 @@ abstract class AbstractBigArray extends AbstractArray {
     public final long size() {
         return size;
     }
+
+    public abstract void resize(long newSize);
 
     protected abstract int numBytesPerElement();
 
@@ -124,6 +130,15 @@ abstract class AbstractBigArray extends AbstractArray {
         }
     }
 
+    protected final float[] newFloatPage(int page) {
+        if (recycler != null) {
+            final Recycler.V<float[]> v = recycler.floatPage(clearOnResize);
+            return registerNewPage(v, page, BigArrays.FLOAT_PAGE_SIZE);
+        } else {
+            return new float[BigArrays.FLOAT_PAGE_SIZE];
+        }
+    }
+
     protected final double[] newDoublePage(int page) {
         if (recycler != null) {
             final Recycler.V<double[]> v = recycler.doublePage(clearOnResize);
@@ -144,19 +159,17 @@ abstract class AbstractBigArray extends AbstractArray {
 
     protected final void releasePage(int page) {
         if (recycler != null) {
-            cache[page].release();
+            cache[page].close();
             cache[page] = null;
         }
     }
 
     @Override
-    public final boolean release() {
-        super.release();
+    protected final void doClose() {
         if (recycler != null) {
-            Releasables.release(cache);
+            Releasables.close(cache);
             cache = null;
         }
-        return true;
     }
 
 }

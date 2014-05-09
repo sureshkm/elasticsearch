@@ -21,11 +21,12 @@ package org.elasticsearch.search.aggregations.bucket;
 
 import org.elasticsearch.search.aggregations.Aggregation;
 import org.elasticsearch.search.aggregations.Aggregations;
+import org.elasticsearch.search.aggregations.HasAggregations;
 
 /**
  * A single bucket aggregation
  */
-public interface SingleBucketAggregation extends Aggregation {
+public interface SingleBucketAggregation extends Aggregation, HasAggregations {
 
     /**
      * @return  The number of documents in this bucket

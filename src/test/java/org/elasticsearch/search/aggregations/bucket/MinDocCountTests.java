@@ -23,10 +23,9 @@ import com.carrotsearch.hppc.LongOpenHashSet;
 import com.carrotsearch.hppc.LongSet;
 import com.carrotsearch.randomizedtesting.generators.RandomStrings;
 import org.elasticsearch.action.index.IndexRequestBuilder;
+import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.action.search.SearchType;
-import org.elasticsearch.common.settings.ImmutableSettings;
-import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.search.aggregations.bucket.histogram.DateHistogram;
@@ -34,9 +33,9 @@ import org.elasticsearch.search.aggregations.bucket.histogram.Histogram;
 import org.elasticsearch.search.aggregations.bucket.terms.Terms;
 import org.elasticsearch.search.aggregations.bucket.terms.TermsBuilder;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
+import org.elasticsearch.test.junit.annotations.TestLogging;
 import org.joda.time.DateTime;
 import org.joda.time.format.DateTimeFormat;
-import org.junit.Before;
 
 import java.util.*;
 import java.util.regex.Matcher;
@@ -44,30 +43,26 @@ import java.util.regex.Pattern;
 
 import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
 import static org.elasticsearch.search.aggregations.AggregationBuilders.*;
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAllSuccessful;
 
+
+@ElasticsearchIntegrationTest.SuiteScopeTest
+@TestLogging("action.admin.indices.refresh:TRACE,action.search.type:TRACE,cluster.service:TRACE")
 public class MinDocCountTests extends ElasticsearchIntegrationTest {
 
     private static final QueryBuilder QUERY = QueryBuilders.termQuery("match", true);
 
+    private static int cardinality;
+
     @Override
-    public Settings indexSettings() {
-        return ImmutableSettings.builder()
-                .put("index.number_of_shards", between(1, 5))
-                .put("index.number_of_replicas", between(0, 1))
-                .build();
-    }
-
-    private int cardinality;
-
-    @Before
-    public void indexData() throws Exception {
+    public void setupSuiteScopeCluster() throws Exception {
         createIndex("idx");
 
         cardinality = randomIntBetween(8, 30);
-        final List<IndexRequestBuilder> indexRequests = new ArrayList<IndexRequestBuilder>();
-        final Set<String> stringTerms = new HashSet<String>();
+        final List<IndexRequestBuilder> indexRequests = new ArrayList<>();
+        final Set<String> stringTerms = new HashSet<>();
         final LongSet longTerms = new LongOpenHashSet();
-        final Set<String> dateTerms = new HashSet<String>();
+        final Set<String> dateTerms = new HashSet<>();
         for (int i = 0; i < cardinality; ++i) {
             String stringTerm;
             do {
@@ -189,19 +184,19 @@ public class MinDocCountTests extends ElasticsearchIntegrationTest {
     }
 
     public void testStringCountAscWithInclude() throws Exception {
-        testMinDocCountOnTerms("s", Script.NO, Terms.Order.count(true), ".*a.*");
+        testMinDocCountOnTerms("s", Script.NO, Terms.Order.count(true), ".*a.*", true);
     }
 
     public void testStringScriptCountAscWithInclude() throws Exception {
-        testMinDocCountOnTerms("s", Script.YES, Terms.Order.count(true), ".*a.*");
+        testMinDocCountOnTerms("s", Script.YES, Terms.Order.count(true), ".*a.*", true);
     }
 
     public void testStringCountDescWithInclude() throws Exception {
-        testMinDocCountOnTerms("s", Script.NO, Terms.Order.count(false), ".*a.*");
+        testMinDocCountOnTerms("s", Script.NO, Terms.Order.count(false), ".*a.*", true);
     }
 
     public void testStringScriptCountDescWithInclude() throws Exception {
-        testMinDocCountOnTerms("s", Script.YES, Terms.Order.count(false), ".*a.*");
+        testMinDocCountOnTerms("s", Script.YES, Terms.Order.count(false), ".*a.*", true);
     }
 
     public void testLongTermAsc() throws Exception {
@@ -269,10 +264,10 @@ public class MinDocCountTests extends ElasticsearchIntegrationTest {
     }
 
     private void testMinDocCountOnTerms(String field, Script script, Terms.Order order) throws Exception {
-        testMinDocCountOnTerms(field, script, order, null);
+        testMinDocCountOnTerms(field, script, order, null, true);
     }
 
-    private void testMinDocCountOnTerms(String field, Script script, Terms.Order order, String include) throws Exception {
+    private void testMinDocCountOnTerms(String field, Script script, Terms.Order order, String include, boolean retryOnFailure) throws Exception {
         // all terms
         final SearchResponse allTermsResponse = client().prepareSearch("idx").setTypes("type")
                 .setSearchType(SearchType.COUNT)
@@ -283,12 +278,14 @@ public class MinDocCountTests extends ElasticsearchIntegrationTest {
                         .size(cardinality + randomInt(10))
                         .minDocCount(0))
                 .execute().actionGet();
+        assertAllSuccessful(allTermsResponse);
+
         final Terms allTerms = allTermsResponse.getAggregations().get("terms");
         assertEquals(cardinality, allTerms.getBuckets().size());
 
         for (long minDocCount = 0; minDocCount < 20; ++minDocCount) {
             final int size = randomIntBetween(1, cardinality + 2);
-            final SearchResponse response = client().prepareSearch("idx").setTypes("type")
+            final SearchRequest request = client().prepareSearch("idx").setTypes("type")
                     .setSearchType(SearchType.COUNT)
                     .setQuery(QUERY)
                     .addAggregation(script.apply(terms("terms"), field)
@@ -297,9 +294,26 @@ public class MinDocCountTests extends ElasticsearchIntegrationTest {
                             .size(size)
                             .include(include)
                             .shardSize(cardinality + randomInt(10))
-                            .minDocCount(minDocCount))
-                    .execute().actionGet();
-            assertSubset(allTerms, (Terms) response.getAggregations().get("terms"), minDocCount, size, include);
+                            .minDocCount(minDocCount)).request();
+            final SearchResponse response = client().search(request).get();
+            try {
+                assertAllSuccessful(response);
+                assertSubset(allTerms, (Terms) response.getAggregations().get("terms"), minDocCount, size, include);
+            } catch (AssertionError ae) {
+                if (!retryOnFailure) {
+                    throw ae;
+                }
+                logger.info("test failed. trying to see if it recovers after 1m.", ae);
+                try {
+                    Thread.sleep(60000);
+                    logger.debug("1m passed. retrying.");
+                    testMinDocCountOnTerms(field, script, order, include, false);
+                } catch (Throwable secondFailure) {
+                    logger.error("exception on retry (will re-throw the original in a sec)", secondFailure);
+                } finally {
+                    throw ae;
+                }
+            }
         }
 
     }

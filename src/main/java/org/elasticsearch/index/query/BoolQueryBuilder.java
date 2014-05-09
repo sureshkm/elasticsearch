@@ -31,11 +31,11 @@ import java.util.List;
  */
 public class BoolQueryBuilder extends BaseQueryBuilder implements BoostableQueryBuilder<BoolQueryBuilder> {
 
-    private ArrayList<QueryBuilder> mustClauses = new ArrayList<QueryBuilder>();
+    private ArrayList<QueryBuilder> mustClauses = new ArrayList<>();
 
-    private ArrayList<QueryBuilder> mustNotClauses = new ArrayList<QueryBuilder>();
+    private ArrayList<QueryBuilder> mustNotClauses = new ArrayList<>();
 
-    private ArrayList<QueryBuilder> shouldClauses = new ArrayList<QueryBuilder>();
+    private ArrayList<QueryBuilder> shouldClauses = new ArrayList<>();
 
     private float boost = -1;
 
@@ -119,10 +119,11 @@ public class BoolQueryBuilder extends BaseQueryBuilder implements BoostableQuery
     }
 
     /**
-     * Return <code>true</code> if the query being built has no clause yet
+     * Returns <code>true</code> iff this query builder has at least one should, must or mustNot clause.
+     * Otherwise <code>false</code>.
      */
     public boolean hasClauses() {
-        return !mustClauses.isEmpty() || !mustNotClauses.isEmpty() || !shouldClauses.isEmpty();
+        return !(mustClauses.isEmpty() && shouldClauses.isEmpty() && mustNotClauses.isEmpty());
     }
     
     /**

@@ -20,14 +20,14 @@ package org.elasticsearch.search.aggregations.bucket.geogrid;
 
 import org.apache.lucene.index.AtomicReaderContext;
 import org.elasticsearch.common.lease.Releasables;
+import org.elasticsearch.common.util.LongHash;
 import org.elasticsearch.index.fielddata.LongValues;
 import org.elasticsearch.search.aggregations.Aggregator;
 import org.elasticsearch.search.aggregations.AggregatorFactories;
 import org.elasticsearch.search.aggregations.InternalAggregations;
 import org.elasticsearch.search.aggregations.bucket.BucketsAggregator;
-import org.elasticsearch.search.aggregations.bucket.LongHash;
 import org.elasticsearch.search.aggregations.support.AggregationContext;
-import org.elasticsearch.search.aggregations.support.numeric.NumericValuesSource;
+import org.elasticsearch.search.aggregations.support.ValuesSource;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -35,7 +35,7 @@ import java.util.Collections;
 
 /**
  * Aggregates data expressed as GeoHash longs (for efficiency's sake) but formats results as Geohash strings.
- * 
+ *
  */
 
 public class GeoHashGridAggregator extends BucketsAggregator {
@@ -44,17 +44,17 @@ public class GeoHashGridAggregator extends BucketsAggregator {
 
     private final int requiredSize;
     private final int shardSize;
-    private final NumericValuesSource valuesSource;
+    private final ValuesSource.Numeric valuesSource;
     private final LongHash bucketOrds;
     private LongValues values;
 
-    public GeoHashGridAggregator(String name, AggregatorFactories factories, NumericValuesSource valuesSource,
+    public GeoHashGridAggregator(String name, AggregatorFactories factories, ValuesSource.Numeric valuesSource,
                               int requiredSize, int shardSize, AggregationContext aggregationContext, Aggregator parent) {
         super(name, BucketAggregationMode.PER_BUCKET, factories, INITIAL_CAPACITY, aggregationContext, parent);
         this.valuesSource = valuesSource;
         this.requiredSize = requiredSize;
         this.shardSize = shardSize;
-        bucketOrds = new LongHash(INITIAL_CAPACITY,aggregationContext.pageCacheRecycler());
+        bucketOrds = new LongHash(INITIAL_CAPACITY, aggregationContext.bigArrays());
     }
 
     @Override
@@ -77,8 +77,10 @@ public class GeoHashGridAggregator extends BucketsAggregator {
             long bucketOrdinal = bucketOrds.add(val);
             if (bucketOrdinal < 0) { // already seen
                 bucketOrdinal = - 1 - bucketOrdinal;
+                collectExistingBucket(doc, bucketOrdinal);
+            } else {
+                collectBucket(doc, bucketOrdinal);
             }
-            collectBucket(doc, bucketOrdinal);
         }
     }
 
@@ -100,19 +102,14 @@ public class GeoHashGridAggregator extends BucketsAggregator {
 
         InternalGeoHashGrid.BucketPriorityQueue ordered = new InternalGeoHashGrid.BucketPriorityQueue(size);
         OrdinalBucket spare = null;
-        for (long i = 0; i < bucketOrds.capacity(); ++i) {
-            final long ord = bucketOrds.id(i);
-            if (ord < 0) {
-                // slot is not allocated
-                continue;
-            }
-
+        for (long i = 0; i < bucketOrds.size(); i++) {
             if (spare == null) {
                 spare = new OrdinalBucket();
             }
-            spare.geohashAsLong = bucketOrds.key(i);
-            spare.docCount = bucketDocCount(ord);
-            spare.bucketOrd = ord;
+
+            spare.geohashAsLong = bucketOrds.get(i);
+            spare.docCount = bucketDocCount(i);
+            spare.bucketOrd = i;
             spare = (OrdinalBucket) ordered.insertWithOverflow(spare);
         }
 
@@ -129,43 +126,11 @@ public class GeoHashGridAggregator extends BucketsAggregator {
     public InternalGeoHashGrid buildEmptyAggregation() {
         return new InternalGeoHashGrid(name, requiredSize, Collections.<InternalGeoHashGrid.Bucket>emptyList());
     }
-    
-    
+
+
     @Override
-    public void doRelease() {
-        Releasables.release(bucketOrds);
-    }    
-    
-    public static class Unmapped extends Aggregator {
-        private int requiredSize;
-        public Unmapped(String name, int requiredSize, AggregationContext aggregationContext, Aggregator parent) {
-            
-            super(name, BucketAggregationMode.PER_BUCKET, AggregatorFactories.EMPTY, 0, aggregationContext, parent);
-            this.requiredSize=requiredSize;
-        }
-
-        @Override
-        public boolean shouldCollect() {
-            return false;
-        }
-
-        @Override
-        public void setNextReader(AtomicReaderContext reader) {
-        }
-
-        @Override
-        public void collect(int doc, long owningBucketOrdinal) throws IOException {
-        }
-
-        @Override
-        public InternalGeoHashGrid buildAggregation(long owningBucketOrdinal) {
-            return (InternalGeoHashGrid) buildEmptyAggregation();
-        }
-
-        @Override
-        public InternalGeoHashGrid buildEmptyAggregation() {
-            return new InternalGeoHashGrid(name, requiredSize, Collections.<InternalGeoHashGrid.Bucket>emptyList());
-        }
-    }    
+    public void doClose() {
+        Releasables.close(bucketOrds);
+    }
 
 }

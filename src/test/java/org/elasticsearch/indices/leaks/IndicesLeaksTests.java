@@ -28,24 +28,24 @@ import org.elasticsearch.index.shard.service.IndexShard;
 import org.elasticsearch.indices.IndicesService;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
 import org.elasticsearch.test.ElasticsearchIntegrationTest.ClusterScope;
-import org.elasticsearch.test.ElasticsearchIntegrationTest.Scope;
 import org.junit.Test;
 
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.elasticsearch.test.ElasticsearchIntegrationTest.*;
 import static org.hamcrest.Matchers.nullValue;
 
 /**
  */
-@ClusterScope(scope=Scope.TEST, numNodes=1)
+@ClusterScope(scope= Scope.TEST, numDataNodes =1)
 public class IndicesLeaksTests extends ElasticsearchIntegrationTest {
 
 
     @SuppressWarnings({"ConstantConditions", "unchecked"})
     @Test
-    @BadApple
+    @BadApple(bugUrl = "https://github.com/elasticsearch/elasticsearch/issues/3232")
     public void testIndexShardLifecycleLeak() throws Exception {
 
         client().admin().indices().prepareCreate("test")
@@ -62,8 +62,8 @@ public class IndicesLeaksTests extends ElasticsearchIntegrationTest {
 
         performCommonOperations();
 
-        List<WeakReference> indexReferences = new ArrayList<WeakReference>();
-        List<WeakReference> shardReferences = new ArrayList<WeakReference>();
+        List<WeakReference> indexReferences = new ArrayList<>();
+        List<WeakReference> shardReferences = new ArrayList<>();
 
         // TODO if we could iterate over the already created classes on the injector, we can just add them here to the list
         // for now, we simple add some classes that make sense

@@ -19,7 +19,6 @@
 
 package org.elasticsearch.rest.action.cat;
 
-import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.admin.cluster.node.info.NodeInfo;
 import org.elasticsearch.action.admin.cluster.node.info.NodesInfoRequest;
 import org.elasticsearch.action.admin.cluster.node.info.NodesInfoResponse;
@@ -39,10 +38,11 @@ import org.elasticsearch.common.transport.InetSocketTransportAddress;
 import org.elasticsearch.rest.RestChannel;
 import org.elasticsearch.rest.RestController;
 import org.elasticsearch.rest.RestRequest;
-import org.elasticsearch.rest.XContentThrowableRestResponse;
+import org.elasticsearch.rest.RestResponse;
+import org.elasticsearch.rest.action.support.RestActionListener;
+import org.elasticsearch.rest.action.support.RestResponseListener;
 import org.elasticsearch.rest.action.support.RestTable;
 
-import java.io.IOException;
 import java.util.Locale;
 
 import static org.elasticsearch.rest.RestRequest.Method.GET;
@@ -67,55 +67,24 @@ public class RestNodesAction extends AbstractCatAction {
         clusterStateRequest.local(request.paramAsBoolean("local", clusterStateRequest.local()));
         clusterStateRequest.masterNodeTimeout(request.paramAsTime("master_timeout", clusterStateRequest.masterNodeTimeout()));
 
-        client.admin().cluster().state(clusterStateRequest, new ActionListener<ClusterStateResponse>() {
+        client.admin().cluster().state(clusterStateRequest, new RestActionListener<ClusterStateResponse>(channel) {
             @Override
-            public void onResponse(final ClusterStateResponse clusterStateResponse) {
+            public void processResponse(final ClusterStateResponse clusterStateResponse) {
                 NodesInfoRequest nodesInfoRequest = new NodesInfoRequest();
                 nodesInfoRequest.clear().jvm(true).os(true).process(true);
-                client.admin().cluster().nodesInfo(nodesInfoRequest, new ActionListener<NodesInfoResponse>() {
+                client.admin().cluster().nodesInfo(nodesInfoRequest, new RestActionListener<NodesInfoResponse>(channel) {
                     @Override
-                    public void onResponse(final NodesInfoResponse nodesInfoResponse) {
+                    public void processResponse(final NodesInfoResponse nodesInfoResponse) {
                         NodesStatsRequest nodesStatsRequest = new NodesStatsRequest();
                         nodesStatsRequest.clear().jvm(true).os(true).fs(true).indices(true);
-                        client.admin().cluster().nodesStats(nodesStatsRequest, new ActionListener<NodesStatsResponse>() {
+                        client.admin().cluster().nodesStats(nodesStatsRequest, new RestResponseListener<NodesStatsResponse>(channel) {
                             @Override
-                            public void onResponse(NodesStatsResponse nodesStatsResponse) {
-                                try {
-                                    channel.sendResponse(RestTable.buildResponse(buildTable(request, clusterStateResponse, nodesInfoResponse, nodesStatsResponse), request, channel));
-                                } catch (Throwable e) {
-                                    onFailure(e);
-                                }
-                            }
-
-                            @Override
-                            public void onFailure(Throwable e) {
-                                try {
-                                    channel.sendResponse(new XContentThrowableRestResponse(request, e));
-                                } catch (IOException e1) {
-                                    logger.error("Failed to send failure response", e1);
-                                }
+                            public RestResponse buildResponse(NodesStatsResponse nodesStatsResponse) throws Exception {
+                                return RestTable.buildResponse(buildTable(request, clusterStateResponse, nodesInfoResponse, nodesStatsResponse), channel);
                             }
                         });
                     }
-
-                    @Override
-                    public void onFailure(Throwable e) {
-                        try {
-                            channel.sendResponse(new XContentThrowableRestResponse(request, e));
-                        } catch (IOException e1) {
-                            logger.error("Failed to send failure response", e1);
-                        }
-                    }
                 });
-            }
-
-            @Override
-            public void onFailure(Throwable e) {
-                try {
-                    channel.sendResponse(new XContentThrowableRestResponse(request, e));
-                } catch (IOException e1) {
-                    logger.error("Failed to send failure response", e1);
-                }
             }
         });
     }
@@ -201,6 +170,10 @@ public class RestNodesAction extends AbstractCatAction {
         table.addCell("segments.count", "alias:sc,segmentsCount;default:false;text-align:right;desc:number of segments");
         table.addCell("segments.memory", "alias:sm,segmentsMemory;default:false;text-align:right;desc:memory used by segments");
 
+        table.addCell("suggest.current", "alias:suc,suggestCurrent;default:false;text-align:right;desc:number of current suggest ops");
+        table.addCell("suggest.time", "alias:suti,suggestTime;default:false;text-align:right;desc:time spend in suggest");
+        table.addCell("suggest.total", "alias:suto,suggestTotal;default:false;text-align:right;desc:number of suggest ops");
+
         table.endHeaders();
         return table;
     }
@@ -228,7 +201,7 @@ public class RestNodesAction extends AbstractCatAction {
                 table.addCell("-");
             }
 
-            table.addCell(info == null ? null : info.getVersion().number());
+            table.addCell(node.getVersion().number());
             table.addCell(info == null ? null : info.getBuild().hashShort());
             table.addCell(info == null ? null : info.getJvm().version());
             table.addCell(stats == null ? null : stats.getFs() == null ? null : stats.getFs().total().getAvailable());
@@ -240,7 +213,7 @@ public class RestNodesAction extends AbstractCatAction {
             table.addCell(stats == null ? null : stats.getOs() == null ? null : stats.getOs().getLoadAverage().length < 1 ? null : String.format(Locale.ROOT, "%.2f", stats.getOs().getLoadAverage()[0]));
             table.addCell(stats == null ? null : stats.getJvm().uptime());
             table.addCell(node.clientNode() ? "c" : node.dataNode() ? "d" : "-");
-            table.addCell(masterId.equals(node.id()) ? "*" : node.masterNode() ? "m" : "-");
+            table.addCell(masterId == null ? "x" : masterId.equals(node.id()) ? "*" : node.masterNode() ? "m" : "-");
             table.addCell(node.name());
 
             table.addCell(stats == null ? null : stats.getIndices().getCompletion().getSize());
@@ -298,6 +271,10 @@ public class RestNodesAction extends AbstractCatAction {
 
             table.addCell(stats == null ? null : stats.getIndices().getSegments().getCount());
             table.addCell(stats == null ? null : stats.getIndices().getSegments().getMemory());
+
+            table.addCell(stats == null ? null : stats.getIndices().getSuggest().getCurrent());
+            table.addCell(stats == null ? null : stats.getIndices().getSuggest().getTime());
+            table.addCell(stats == null ? null : stats.getIndices().getSuggest().getCount());
 
             table.endRow();
         }

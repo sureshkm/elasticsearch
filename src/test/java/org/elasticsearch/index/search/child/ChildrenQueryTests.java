@@ -21,6 +21,7 @@ package org.elasticsearch.index.search.child;
 import com.carrotsearch.hppc.FloatArrayList;
 import com.carrotsearch.hppc.IntOpenHashSet;
 import com.carrotsearch.hppc.ObjectObjectOpenHashMap;
+import org.apache.lucene.analysis.MockAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.StringField;
@@ -29,9 +30,11 @@ import org.apache.lucene.queries.TermFilter;
 import org.apache.lucene.search.*;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.util.FixedBitSet;
+import org.apache.lucene.util.LuceneTestCase;
 import org.elasticsearch.common.lucene.search.NotFilter;
 import org.elasticsearch.common.lucene.search.XFilteredQuery;
 import org.elasticsearch.index.engine.Engine;
+import org.elasticsearch.index.fielddata.plain.ParentChildIndexFieldData;
 import org.elasticsearch.index.mapper.Uid;
 import org.elasticsearch.index.mapper.internal.ParentFieldMapper;
 import org.elasticsearch.index.mapper.internal.TypeFieldMapper;
@@ -47,6 +50,7 @@ import org.junit.Test;
 import java.io.IOException;
 import java.util.Map;
 import java.util.NavigableMap;
+import java.util.Random;
 import java.util.TreeMap;
 
 import static org.elasticsearch.index.search.child.ChildrenConstantScoreQueryTests.assertBitSet;
@@ -67,10 +71,26 @@ public class ChildrenQueryTests extends ElasticsearchLuceneTestCase {
     }
 
     @Test
+    public void testBasicQuerySanities() {
+        Query childQuery = new TermQuery(new Term("field", "value"));
+        ScoreType scoreType = ScoreType.values()[random().nextInt(ScoreType.values().length)];
+        ParentFieldMapper parentFieldMapper = SearchContext.current().mapperService().documentMapper("child").parentFieldMapper();
+        ParentChildIndexFieldData parentChildIndexFieldData = SearchContext.current().fieldData().getForField(parentFieldMapper);
+        Filter parentFilter = new TermFilter(new Term(TypeFieldMapper.NAME, "parent"));
+        Query query = new ChildrenQuery(parentChildIndexFieldData, "parent", "child", parentFilter, childQuery, scoreType, 12, NonNestedDocsFilter.INSTANCE);
+        QueryUtils.check(query);
+    }
+
+    @Test
     public void testRandom() throws Exception {
         Directory directory = newDirectory();
-        RandomIndexWriter indexWriter = new RandomIndexWriter(random(), directory);
-        int numUniqueChildValues = 1 + random().nextInt(TEST_NIGHTLY ? 6000 : 600);
+        final Random r = random();
+        final IndexWriterConfig iwc = LuceneTestCase.newIndexWriterConfig(r,
+                LuceneTestCase.TEST_VERSION_CURRENT, new MockAnalyzer(r))
+                .setMaxBufferedDocs(IndexWriterConfig.DISABLE_AUTO_FLUSH)
+                .setRAMBufferSizeMB(scaledRandomIntBetween(16, 64)); // we might index a lot - don't go crazy here
+        RandomIndexWriter indexWriter = new RandomIndexWriter(r, directory, iwc);
+        int numUniqueChildValues = scaledRandomIntBetween(100, 2000);
         String[] childValues = new String[numUniqueChildValues];
         for (int i = 0; i < numUniqueChildValues; i++) {
             childValues[i] = Integer.toString(i);
@@ -79,8 +99,8 @@ public class ChildrenQueryTests extends ElasticsearchLuceneTestCase {
         IntOpenHashSet filteredOrDeletedDocs = new IntOpenHashSet();
 
         int childDocId = 0;
-        int numParentDocs = 1 + random().nextInt(TEST_NIGHTLY ? 20000 : 1000);
-        ObjectObjectOpenHashMap<String, NavigableMap<String, FloatArrayList>> childValueToParentIds = new ObjectObjectOpenHashMap<String, NavigableMap<String, FloatArrayList>>();
+        int numParentDocs = scaledRandomIntBetween(1, numUniqueChildValues);
+        ObjectObjectOpenHashMap<String, NavigableMap<String, FloatArrayList>> childValueToParentIds = new ObjectObjectOpenHashMap<>();
         for (int parentDocId = 0; parentDocId < numParentDocs; parentDocId++) {
             boolean markParentAsDeleted = rarely();
             boolean filterMe = rarely();
@@ -98,12 +118,7 @@ public class ChildrenQueryTests extends ElasticsearchLuceneTestCase {
             }
             indexWriter.addDocument(document);
 
-            int numChildDocs;
-            if (rarely()) {
-                numChildDocs = random().nextInt(TEST_NIGHTLY ? 100 : 25);
-            } else {
-                numChildDocs = random().nextInt(TEST_NIGHTLY ? 40 : 10);
-            }
+            int numChildDocs = scaledRandomIntBetween(0, 100);
             for (int i = 0; i < numChildDocs; i++) {
                 boolean markChildAsDeleted = rarely();
                 String childValue = childValues[random().nextInt(childValues.length)];
@@ -123,7 +138,7 @@ public class ChildrenQueryTests extends ElasticsearchLuceneTestCase {
                     if (childValueToParentIds.containsKey(childValue)) {
                         parentIdToChildScores = childValueToParentIds.lget();
                     } else {
-                        childValueToParentIds.put(childValue, parentIdToChildScores = new TreeMap<String, FloatArrayList>());
+                        childValueToParentIds.put(childValue, parentIdToChildScores = new TreeMap<>());
                     }
                     if (!markParentAsDeleted && !filterMe) {
                         FloatArrayList childScores = parentIdToChildScores.get(parent);
@@ -146,6 +161,9 @@ public class ChildrenQueryTests extends ElasticsearchLuceneTestCase {
                 ChildrenQueryTests.class.getSimpleName(), searcher
         );
         ((TestSearchContext) SearchContext.current()).setSearcher(new ContextIndexSearcher(SearchContext.current(), engineSearcher));
+
+        ParentFieldMapper parentFieldMapper = SearchContext.current().mapperService().documentMapper("child").parentFieldMapper();
+        ParentChildIndexFieldData parentChildIndexFieldData = SearchContext.current().fieldData().getForField(parentFieldMapper);
         Filter rawParentFilter = new TermFilter(new Term(TypeFieldMapper.NAME, "parent"));
         Filter rawFilterMe = new NotFilter(new TermFilter(new Term("filter", "me")));
         int max = numUniqueChildValues / 4;
@@ -199,7 +217,7 @@ public class ChildrenQueryTests extends ElasticsearchLuceneTestCase {
             int shortCircuitParentDocSet = random().nextInt(numParentDocs);
             ScoreType scoreType = ScoreType.values()[random().nextInt(ScoreType.values().length)];
             Filter nonNestedDocsFilter = random().nextBoolean() ? NonNestedDocsFilter.INSTANCE : null;
-            Query query = new ChildrenQuery("parent", "child", parentFilter, childQuery, scoreType, shortCircuitParentDocSet, nonNestedDocsFilter);
+            Query query = new ChildrenQuery(parentChildIndexFieldData, "parent", "child", parentFilter, childQuery, scoreType, shortCircuitParentDocSet, nonNestedDocsFilter);
             query = new XFilteredQuery(query, filterMe);
             BitSetCollector collector = new BitSetCollector(indexReader.maxDoc());
             int numHits = 1 + random().nextInt(25);

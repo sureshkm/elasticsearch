@@ -29,6 +29,7 @@ import org.elasticsearch.index.query.MatchQueryBuilder;
 import org.elasticsearch.index.query.MultiMatchQueryBuilder;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.SearchHits;
+import org.elasticsearch.search.sort.SortBuilders;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
 import org.junit.Before;
 import org.junit.Test;
@@ -52,6 +53,7 @@ public class MultiMatchQueryTests extends ElasticsearchIntegrationTest {
     @Before
     public void init() throws Exception {
         CreateIndexRequestBuilder builder = prepareCreate("test").setSettings(settingsBuilder()
+                .put(indexSettings())
                 .put(SETTING_NUMBER_OF_SHARDS, 1)
                 .put(SETTING_NUMBER_OF_REPLICAS, 0)
                 .put("index.analysis.analyzer.perfect_match.type", "custom")
@@ -63,8 +65,8 @@ public class MultiMatchQueryTests extends ElasticsearchIntegrationTest {
         );
         assertAcked(builder.addMapping("test", createMapping()));
         ensureGreen();
-        int numDocs = atLeast(50);
-        List<IndexRequestBuilder> builders = new ArrayList<IndexRequestBuilder>();
+        int numDocs = scaledRandomIntBetween(50, 100);
+        List<IndexRequestBuilder> builders = new ArrayList<>();
         builders.add(client().prepareIndex("test", "test", "theone").setSource(
                 "full_name", "Captain America",
                 "first_name", "Captain",
@@ -98,11 +100,11 @@ public class MultiMatchQueryTests extends ElasticsearchIntegrationTest {
                 "last_name", "",
                 "category", "marvel hero",
                 "skill", 1));
-        List<String> firstNames = new ArrayList<String>();
+        List<String> firstNames = new ArrayList<>();
         fill(firstNames, "Captain", between(15, 25));
         fill(firstNames, "Ultimate", between(5, 10));
         fillRandom(firstNames, between(3, 7));
-        List<String> lastNames = new ArrayList<String>();
+        List<String> lastNames = new ArrayList<>();
         fill(lastNames, "Captain", between(3, 7));
         fillRandom(lastNames, between(30, 40));
         for (int i = 0; i < numDocs; i++) {
@@ -274,17 +276,19 @@ public class MultiMatchQueryTests extends ElasticsearchIntegrationTest {
 
         final int numDocs = (int) client().prepareCount("test")
                 .setQuery(matchAllQuery()).get().getCount();
-        int numIters = atLeast(5);
+        int numIters = scaledRandomIntBetween(5, 10);
         for (int i = 0; i < numIters; i++) {
             {
                 MatchQueryBuilder.Type type = randomBoolean() ? null : MatchQueryBuilder.Type.BOOLEAN;
                 MultiMatchQueryBuilder multiMatchQueryBuilder = randomBoolean() ? multiMatchQuery("marvel hero captain america", "full_name", "first_name", "last_name", "category") :
                         multiMatchQuery("marvel hero captain america", "*_name", randomBoolean() ? "category" : "categ*");
                 SearchResponse left = client().prepareSearch("test").setSize(numDocs)
+                        .addSort(SortBuilders.scoreSort()).addSort(SortBuilders.fieldSort("_uid"))
                         .setQuery(randomizeType(multiMatchQueryBuilder
                                 .operator(MatchQueryBuilder.Operator.OR).type(type))).get();
 
                 SearchResponse right = client().prepareSearch("test").setSize(numDocs)
+                        .addSort(SortBuilders.scoreSort()).addSort(SortBuilders.fieldSort("_uid"))
                         .setQuery(disMaxQuery().
                                 add(matchQuery("full_name", "marvel hero captain america"))
                                 .add(matchQuery("first_name", "marvel hero captain america"))
@@ -301,10 +305,12 @@ public class MultiMatchQueryTests extends ElasticsearchIntegrationTest {
                 MultiMatchQueryBuilder multiMatchQueryBuilder = randomBoolean() ? multiMatchQuery("captain america", "full_name", "first_name", "last_name", "category") :
                         multiMatchQuery("captain america", "*_name", randomBoolean() ? "category" : "categ*");
                 SearchResponse left = client().prepareSearch("test").setSize(numDocs)
+                        .addSort(SortBuilders.scoreSort()).addSort(SortBuilders.fieldSort("_uid"))
                         .setQuery(randomizeType(multiMatchQueryBuilder
                                 .operator(op).useDisMax(false).minimumShouldMatch(minShouldMatch).type(type))).get();
 
                 SearchResponse right = client().prepareSearch("test").setSize(numDocs)
+                        .addSort(SortBuilders.scoreSort()).addSort(SortBuilders.fieldSort("_uid"))
                         .setQuery(boolQuery().minimumShouldMatch(minShouldMatch)
                                 .should(randomBoolean() ? termQuery("full_name", "captain america") : matchQuery("full_name", "captain america").operator(op))
                                 .should(matchQuery("first_name", "captain america").operator(op))
@@ -318,10 +324,12 @@ public class MultiMatchQueryTests extends ElasticsearchIntegrationTest {
                 String minShouldMatch = randomBoolean() ? null : "" + between(0, 1);
                 MatchQueryBuilder.Operator op = randomBoolean() ? MatchQueryBuilder.Operator.AND : MatchQueryBuilder.Operator.OR;
                 SearchResponse left = client().prepareSearch("test").setSize(numDocs)
+                        .addSort(SortBuilders.scoreSort()).addSort(SortBuilders.fieldSort("_uid"))
                         .setQuery(randomizeType(multiMatchQuery("capta", "full_name", "first_name", "last_name", "category")
                                 .type(MatchQueryBuilder.Type.PHRASE_PREFIX).useDisMax(false).minimumShouldMatch(minShouldMatch))).get();
 
                 SearchResponse right = client().prepareSearch("test").setSize(numDocs)
+                        .addSort(SortBuilders.scoreSort()).addSort(SortBuilders.fieldSort("_uid"))
                         .setQuery(boolQuery().minimumShouldMatch(minShouldMatch)
                                 .should(matchPhrasePrefixQuery("full_name", "capta"))
                                 .should(matchPhrasePrefixQuery("first_name", "capta").operator(op))
@@ -336,14 +344,17 @@ public class MultiMatchQueryTests extends ElasticsearchIntegrationTest {
                 SearchResponse left;
                 if (randomBoolean()) {
                     left = client().prepareSearch("test").setSize(numDocs)
+                            .addSort(SortBuilders.scoreSort()).addSort(SortBuilders.fieldSort("_uid"))
                             .setQuery(randomizeType(multiMatchQuery("captain america", "full_name", "first_name", "last_name", "category")
                                     .type(MatchQueryBuilder.Type.PHRASE).useDisMax(false).minimumShouldMatch(minShouldMatch))).get();
                 } else {
                     left = client().prepareSearch("test").setSize(numDocs)
+                            .addSort(SortBuilders.scoreSort()).addSort(SortBuilders.fieldSort("_uid"))
                             .setQuery(randomizeType(multiMatchQuery("captain america", "full_name", "first_name", "last_name", "category")
                                     .type(MatchQueryBuilder.Type.PHRASE).tieBreaker(1.0f).minimumShouldMatch(minShouldMatch))).get();
                 }
                 SearchResponse right = client().prepareSearch("test").setSize(numDocs)
+                        .addSort(SortBuilders.scoreSort()).addSort(SortBuilders.fieldSort("_uid"))
                         .setQuery(boolQuery().minimumShouldMatch(minShouldMatch)
                                 .should(matchPhraseQuery("full_name", "captain america"))
                                 .should(matchPhraseQuery("first_name", "captain america").operator(op))

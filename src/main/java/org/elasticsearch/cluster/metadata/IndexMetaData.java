@@ -86,7 +86,7 @@ public class IndexMetaData {
         }
     }
 
-    public static Map<String, Custom.Factory> customFactories = new HashMap<String, Custom.Factory>();
+    public static Map<String, Custom.Factory> customFactories = new HashMap<>();
 
     static {
         // register non plugin custom metadata
@@ -335,6 +335,7 @@ public class IndexMetaData {
         return this.customs;
     }
 
+    @SuppressWarnings("unchecked")
     public <T extends Custom> T custom(String type) {
         return (T) customs.get(type);
     }
@@ -476,11 +477,8 @@ public class IndexMetaData {
         }
 
         public Builder putMapping(String type, String source) throws IOException {
-            XContentParser parser = XContentFactory.xContent(source).createParser(source);
-            try {
+            try (XContentParser parser = XContentFactory.xContent(source).createParser(source)) {
                 putMapping(new MappingMetaData(type, parser.mapOrdered()));
-            } finally {
-                parser.close();
             }
             return this;
         }
@@ -505,7 +503,7 @@ public class IndexMetaData {
             return this;
         }
 
-        public Builder removerAlias(String alias) {
+        public Builder removeAlias(String alias) {
             aliases.remove(alias);
             return this;
         }

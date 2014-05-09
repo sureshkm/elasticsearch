@@ -95,7 +95,8 @@ public class DocumentMapperParser extends AbstractIndexComponent {
                 .put(ObjectMapper.NESTED_CONTENT_TYPE, new ObjectMapper.TypeParser())
                 .put(TypeParsers.MULTI_FIELD_CONTENT_TYPE, TypeParsers.multiFieldConverterTypeParser)
                 .put(CompletionFieldMapper.CONTENT_TYPE, new CompletionFieldMapper.TypeParser())
-                .put(GeoPointFieldMapper.CONTENT_TYPE, new GeoPointFieldMapper.TypeParser());
+                .put(GeoPointFieldMapper.CONTENT_TYPE, new GeoPointFieldMapper.TypeParser())
+                .put(Murmur3FieldMapper.CONTENT_TYPE, new Murmur3FieldMapper.TypeParser());
 
         if (ShapesAvailability.JTS_AVAILABLE) {
             typeParsersBuilder.put(GeoShapeFieldMapper.CONTENT_TYPE, new GeoShapeFieldMapper.TypeParser());
@@ -126,7 +127,7 @@ public class DocumentMapperParser extends AbstractIndexComponent {
 
     public void putTypeParser(String type, Mapper.TypeParser typeParser) {
         synchronized (typeParsersMutex) {
-            typeParsers = new MapBuilder<String, Mapper.TypeParser>(typeParsers)
+            typeParsers = new MapBuilder<>(typeParsers)
                     .put(type, typeParser)
                     .immutableMap();
         }
@@ -134,7 +135,7 @@ public class DocumentMapperParser extends AbstractIndexComponent {
 
     public void putRootTypeParser(String type, Mapper.TypeParser typeParser) {
         synchronized (typeParsersMutex) {
-            rootTypeParsers = new MapBuilder<String, Mapper.TypeParser>(rootTypeParsers)
+            rootTypeParsers = new MapBuilder<>(rootTypeParsers)
                     .put(type, typeParser)
                     .immutableMap();
         }
@@ -282,9 +283,9 @@ public class DocumentMapperParser extends AbstractIndexComponent {
         String rootName = root.keySet().iterator().next();
         Tuple<String, Map<String, Object>> mapping;
         if (type == null || type.equals(rootName)) {
-            mapping = new Tuple<String, Map<String, Object>>(rootName, (Map<String, Object>) root.get(rootName));
+            mapping = new Tuple<>(rootName, (Map<String, Object>) root.get(rootName));
         } else {
-            mapping = new Tuple<String, Map<String, Object>>(type, root);
+            mapping = new Tuple<>(type, root);
         }
 
         return mapping;

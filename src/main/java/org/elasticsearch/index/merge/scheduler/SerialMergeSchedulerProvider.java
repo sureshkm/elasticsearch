@@ -39,16 +39,18 @@ import java.util.concurrent.CopyOnWriteArraySet;
  */
 public class SerialMergeSchedulerProvider extends MergeSchedulerProvider {
 
-    private Set<CustomSerialMergeScheduler> schedulers = new CopyOnWriteArraySet<CustomSerialMergeScheduler>();
+    private Set<CustomSerialMergeScheduler> schedulers = new CopyOnWriteArraySet<>();
+    private final int maxMergeAtOnce;
 
     @Inject
     public SerialMergeSchedulerProvider(ShardId shardId, @IndexSettings Settings indexSettings, ThreadPool threadPool) {
         super(shardId, indexSettings, threadPool);
-        logger.trace("using [serial] merge scheduler");
+        this.maxMergeAtOnce = componentSettings.getAsInt("max_merge_at_once", 5);
+        logger.trace("using [serial] merge scheduler, max_merge_at_once [{}]", maxMergeAtOnce);
     }
 
     @Override
-    public MergeScheduler newMergeScheduler() {
+    public MergeScheduler buildMergeScheduler() {
         CustomSerialMergeScheduler scheduler = new CustomSerialMergeScheduler(logger, this);
         schedulers.add(scheduler);
         return scheduler;
@@ -77,14 +79,14 @@ public class SerialMergeSchedulerProvider extends MergeSchedulerProvider {
         private final SerialMergeSchedulerProvider provider;
 
         public CustomSerialMergeScheduler(ESLogger logger, SerialMergeSchedulerProvider provider) {
-            super(logger);
+            super(logger, provider.maxMergeAtOnce);
             this.provider = provider;
         }
 
         @Override
-        public void merge(IndexWriter writer) throws CorruptIndexException, IOException {
+        public void merge(IndexWriter writer, MergeTrigger trigger, boolean newMergesFound) throws CorruptIndexException, IOException {
             try {
-                super.merge(writer);
+                super.merge(writer, trigger, newMergesFound);
             } catch (Throwable e) {
                 logger.warn("failed to merge", e);
                 provider.failedMerge(new MergePolicy.MergeException(e, writer.getDirectory()));

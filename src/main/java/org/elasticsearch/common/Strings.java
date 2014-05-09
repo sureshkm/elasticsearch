@@ -51,8 +51,7 @@ public class Strings {
     private static final char EXTENSION_SEPARATOR = '.';
 
     public static void tabify(int tabs, String from, StringBuilder to) throws Exception {
-        final BufferedReader reader = new BufferedReader(new FastStringReader(from));
-        try {
+        try (BufferedReader reader = new BufferedReader(new FastStringReader(from))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 for (int i = 0; i < tabs; i++) {
@@ -60,14 +59,11 @@ public class Strings {
                 }
                 to.append(line).append('\n');
             }
-        } finally {
-            reader.close();
         }
     }
 
     public static void spaceify(int spaces, String from, StringBuilder to) throws Exception {
-        final BufferedReader reader = new BufferedReader(new FastStringReader(from));
-        try {
+        try (BufferedReader reader = new BufferedReader(new FastStringReader(from))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 for (int i = 0; i < spaces; i++) {
@@ -75,8 +71,6 @@ public class Strings {
                 }
                 to.append(line).append('\n');
             }
-        } finally {
-            reader.close();
         }
     }
 
@@ -92,7 +86,7 @@ public class Strings {
      * @param decode    decode backslash escaping
      */
     public static List<String> splitSmart(String s, String separator, boolean decode) {
-        ArrayList<String> lst = new ArrayList<String>(2);
+        ArrayList<String> lst = new ArrayList<>(2);
         StringBuilder sb = new StringBuilder();
         int pos = 0, end = s.length();
         while (pos < end) {
@@ -143,7 +137,7 @@ public class Strings {
 
 
     public static List<String> splitWS(String s, boolean decode) {
-        ArrayList<String> lst = new ArrayList<String>(2);
+        ArrayList<String> lst = new ArrayList<>(2);
         StringBuilder sb = new StringBuilder();
         int pos = 0, end = s.length();
         while (pos < end) {
@@ -775,7 +769,7 @@ public class Strings {
         }
 
         String[] pathArray = delimitedListToStringArray(pathToUse, FOLDER_SEPARATOR);
-        List<String> pathElements = new LinkedList<String>();
+        List<String> pathElements = new LinkedList<>();
         int tops = 0;
 
         for (int i = pathArray.length - 1; i >= 0; i--) {
@@ -916,7 +910,7 @@ public class Strings {
         if (isEmpty(array2)) {
             return array1;
         }
-        List<String> result = new ArrayList<String>();
+        List<String> result = new ArrayList<>();
         result.addAll(Arrays.asList(array1));
         for (String str : array2) {
             if (!result.contains(str)) {
@@ -1001,7 +995,7 @@ public class Strings {
         if (isEmpty(array)) {
             return array;
         }
-        Set<String> set = new TreeSet<String>();
+        Set<String> set = new TreeSet<>();
         set.addAll(Arrays.asList(array));
         return toStringArray(set);
     }
@@ -1023,7 +1017,7 @@ public class Strings {
             }
         }
         // TODO (MvG): No push: hppc or jcf?
-        final Set<String> result = new HashSet<String>(count);
+        final Set<String> result = new HashSet<>(count);
         final int len = chars.length;
         int start = 0;  // starting index in chars of the current substring.
         int pos = 0;    // current index in chars.
@@ -1200,7 +1194,7 @@ public class Strings {
             return null;
         }
         StringTokenizer st = new StringTokenizer(str, delimiters);
-        List<String> tokens = new ArrayList<String>();
+        List<String> tokens = new ArrayList<>();
         while (st.hasMoreTokens()) {
             String token = st.nextToken();
             if (trimTokens) {
@@ -1250,7 +1244,7 @@ public class Strings {
         if (delimiter == null) {
             return new String[]{str};
         }
-        List<String> result = new ArrayList<String>();
+        List<String> result = new ArrayList<>();
         if ("".equals(delimiter)) {
             for (int i = 0; i < str.length(); i++) {
                 result.add(deleteAny(str.substring(i, i + 1), charsToDelete));
@@ -1288,7 +1282,7 @@ public class Strings {
      * @return a Set of String entries in the list
      */
     public static Set<String> commaDelimitedListToSet(String str) {
-        Set<String> set = new TreeSet<String>();
+        Set<String> set = new TreeSet<>();
         String[] tokens = commaDelimitedListToStringArray(str);
         set.addAll(Arrays.asList(tokens));
         return set;
@@ -1425,7 +1419,9 @@ public class Strings {
                     }
                     changed = true;
                 }
-                sb.append(Character.toUpperCase(value.charAt(++i)));
+                if (i < value.length() - 1) {
+                    sb.append(Character.toUpperCase(value.charAt(++i)));
+                }
             } else {
                 if (changed) {
                     sb.append(c);

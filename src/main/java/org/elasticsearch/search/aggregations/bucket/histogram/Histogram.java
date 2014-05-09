@@ -18,9 +18,7 @@
  */
 package org.elasticsearch.search.aggregations.bucket.histogram;
 
-import com.google.common.primitives.Longs;
 import org.elasticsearch.common.xcontent.ToXContent;
-import org.elasticsearch.search.aggregations.Aggregation;
 import org.elasticsearch.search.aggregations.bucket.MultiBucketsAggregation;
 
 import java.util.Collection;
@@ -73,23 +71,23 @@ public interface Histogram extends MultiBucketsAggregation {
         public static final Order KEY_ASC = new InternalOrder((byte) 1, "_key", true, new Comparator<InternalHistogram.Bucket>() {
             @Override
             public int compare(InternalHistogram.Bucket b1, InternalHistogram.Bucket b2) {
-                return Longs.compare(b1.key, b2.key);
+                return Long.compare(b1.key, b2.key);
             }
         });
 
         public static final Order KEY_DESC = new InternalOrder((byte) 2, "_key", false, new Comparator<InternalHistogram.Bucket>() {
             @Override
             public int compare(InternalHistogram.Bucket b1, InternalHistogram.Bucket b2) {
-                return -Longs.compare(b1.key, b2.key);
+                return -Long.compare(b1.key, b2.key);
             }
         });
 
         public static final Order COUNT_ASC = new InternalOrder((byte) 3, "_count", true, new Comparator<InternalHistogram.Bucket>() {
             @Override
             public int compare(InternalHistogram.Bucket b1, InternalHistogram.Bucket b2) {
-                int cmp = Longs.compare(b1.getDocCount(), b2.getDocCount());
+                int cmp = Long.compare(b1.getDocCount(), b2.getDocCount());
                 if (cmp == 0) {
-                    cmp = Longs.compare(b1.key, b2.key);
+                    cmp = Long.compare(b1.key, b2.key);
                 }
                 return cmp;
             }
@@ -99,9 +97,9 @@ public interface Histogram extends MultiBucketsAggregation {
         public static final Order COUNT_DESC = new InternalOrder((byte) 4, "_count", false, new Comparator<InternalHistogram.Bucket>() {
             @Override
             public int compare(InternalHistogram.Bucket b1, InternalHistogram.Bucket b2) {
-                int cmp = -Longs.compare(b1.getDocCount(), b2.getDocCount());
+                int cmp = -Long.compare(b1.getDocCount(), b2.getDocCount());
                 if (cmp == 0) {
-                    cmp = Longs.compare(b1.key, b2.key);
+                    cmp = Long.compare(b1.key, b2.key);
                 }
                 return cmp;
             }
@@ -110,11 +108,11 @@ public interface Histogram extends MultiBucketsAggregation {
         /**
          * Creates a bucket ordering strategy that sorts buckets based on a single-valued calc sug-aggregation
          *
-         * @param aggregationName the name of the aggregation
+         * @param path the name of the aggregation
          * @param asc             The direction of the order (ascending or descending)
          */
-        public static Order aggregation(String aggregationName, boolean asc) {
-            return new InternalOrder.Aggregation(aggregationName, null, asc);
+        public static Order aggregation(String path, boolean asc) {
+            return new InternalOrder.Aggregation(path, asc);
         }
 
         /**
@@ -125,7 +123,7 @@ public interface Histogram extends MultiBucketsAggregation {
          * @param asc             The direction of the order (ascending or descending)
          */
         public static Order aggregation(String aggregationName, String valueName, boolean asc) {
-            return new InternalOrder.Aggregation(aggregationName, valueName, asc);
+            return new InternalOrder.Aggregation(aggregationName + "." + valueName, asc);
         }
 
         /**

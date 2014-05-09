@@ -46,8 +46,11 @@ public class TrackingSerialMergeScheduler extends MergeScheduler {
     private final Set<OnGoingMerge> onGoingMerges = ConcurrentCollections.newConcurrentSet();
     private final Set<OnGoingMerge> readOnlyOnGoingMerges = Collections.unmodifiableSet(onGoingMerges);
 
-    public TrackingSerialMergeScheduler(ESLogger logger) {
+    private final int maxMergeAtOnce;
+
+    public TrackingSerialMergeScheduler(ESLogger logger, int maxMergeAtOnce) {
         this.logger = logger;
+        this.maxMergeAtOnce = maxMergeAtOnce;
     }
 
     public long totalMerges() {
@@ -88,8 +91,9 @@ public class TrackingSerialMergeScheduler extends MergeScheduler {
      * multiple threads, only one merge may run at a time.
      */
     @Override
-    synchronized public void merge(IndexWriter writer) throws CorruptIndexException, IOException {
-        while (true) {
+    synchronized public void merge(IndexWriter writer, MergeTrigger trigger, boolean newMergesFound) throws CorruptIndexException, IOException {
+        int cycle = 0;
+        while (cycle++ < maxMergeAtOnce) {
             MergePolicy.OneMerge merge = writer.getNextMerge();
             if (merge == null)
                 break;
@@ -99,8 +103,7 @@ public class TrackingSerialMergeScheduler extends MergeScheduler {
             writer.mergeInit(merge);
 
             int totalNumDocs = merge.totalNumDocs();
-            // don't used #totalBytesSize() since need to be executed under IW lock, might be fixed in future Lucene version
-            long totalSizeInBytes = merge.estimatedMergeBytes;
+            long totalSizeInBytes = merge.totalBytesSize();
             long time = System.currentTimeMillis();
             currentMerges.inc();
             currentMergesNumDocs.inc(totalNumDocs);

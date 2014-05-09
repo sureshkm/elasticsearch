@@ -19,10 +19,7 @@
 package org.elasticsearch.search.aggregations.metrics;
 
 import org.elasticsearch.action.index.IndexRequestBuilder;
-import org.elasticsearch.common.settings.ImmutableSettings;
-import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
-import org.junit.Before;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -32,30 +29,30 @@ import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
 /**
  *
  */
+@ElasticsearchIntegrationTest.SuiteScopeTest
 public abstract class AbstractNumericTests extends ElasticsearchIntegrationTest {
-    
-    @Override
-    public Settings indexSettings() {
-        return ImmutableSettings.builder()
-                .put("index.number_of_shards", between(1, 5))
-                .put("index.number_of_replicas", between(0, 1))
-                .build();
-    }
 
-    @Before
-    public void init() throws Exception {
+    protected static long minValue, maxValue, minValues, maxValues;
+
+    @Override
+    public void setupSuiteScopeCluster() throws Exception {
         createIndex("idx");
         createIndex("idx_unmapped");
 
-        List<IndexRequestBuilder> builders = new ArrayList<IndexRequestBuilder>();
+        List<IndexRequestBuilder> builders = new ArrayList<>();
 
-        for (int i = 0; i < 10; i++) { // TODO randomize the size and the params in here?
+        final int numDocs = 10;
+        for (int i = 0; i < numDocs; i++) { // TODO randomize the size and the params in here?
             builders.add(client().prepareIndex("idx", "type", ""+i).setSource(jsonBuilder()
                     .startObject()
                     .field("value", i+1)
                     .startArray("values").value(i+2).value(i+3).endArray()
                     .endObject()));
         }
+        minValue = 1;
+        minValues = 2;
+        maxValue = numDocs;
+        maxValues = numDocs + 2;
         indexRandom(true, builders);
 
         // creating an index to test the empty buckets functionality. The way it works is by indexing
@@ -63,7 +60,7 @@ public abstract class AbstractNumericTests extends ElasticsearchIntegrationTest 
         // buckets computed.. the empty bucket is the one associated with key "1". then each test will have
         // to check that this bucket exists with the appropriate sub aggregations.
         prepareCreate("empty_bucket_idx").addMapping("type", "value", "type=integer").execute().actionGet();
-        builders = new ArrayList<IndexRequestBuilder>();
+        builders = new ArrayList<>();
         for (int i = 0; i < 2; i++) {
             builders.add(client().prepareIndex("empty_bucket_idx", "type", ""+i).setSource(jsonBuilder()
                     .startObject()

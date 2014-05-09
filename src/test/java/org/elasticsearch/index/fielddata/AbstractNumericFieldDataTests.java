@@ -24,8 +24,11 @@ import org.apache.lucene.document.Field;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.search.*;
-import org.elasticsearch.index.fielddata.fieldcomparator.SortMode;
+import org.elasticsearch.common.settings.ImmutableSettings;
+import org.elasticsearch.search.MultiValueMode;
 import org.junit.Test;
+
+import java.util.Locale;
 
 import static org.hamcrest.Matchers.equalTo;
 
@@ -35,13 +38,21 @@ public abstract class AbstractNumericFieldDataTests extends AbstractFieldDataImp
 
     protected abstract FieldDataType getFieldDataType();
 
+    protected ImmutableSettings.Builder getFieldDataSettings() {
+        ImmutableSettings.Builder builder = ImmutableSettings.builder();
+        IndexFieldData.CommonSettings.MemoryStorageFormat[] formats = IndexFieldData.CommonSettings.MemoryStorageFormat.values();
+        int i = randomInt(formats.length);
+        if (i < formats.length) {
+            builder.put(IndexFieldData.CommonSettings.SETTING_MEMORY_STORAGE_HINT, formats[i].name().toLowerCase(Locale.ROOT));
+        }
+        return builder;
+    }
+
     @Test
     public void testSingleValueAllSetNumber() throws Exception {
         fillSingleValueAllSet();
         IndexNumericFieldData indexFieldData = getForField("value");
         AtomicNumericFieldData fieldData = indexFieldData.load(refreshReader());
-
-        assertThat(fieldData.getNumDocs(), equalTo(3));
 
         LongValues longValues = fieldData.getLongValues();
 
@@ -73,14 +84,14 @@ public abstract class AbstractNumericFieldDataTests extends AbstractFieldDataImp
         TopFieldDocs topDocs;
 
         topDocs = searcher.search(new MatchAllDocsQuery(), 10,
-                new Sort(new SortField("value", indexFieldData.comparatorSource(null, SortMode.MIN))));
+                new Sort(new SortField("value", indexFieldData.comparatorSource(null, MultiValueMode.MIN))));
         assertThat(topDocs.totalHits, equalTo(3));
         assertThat(topDocs.scoreDocs[0].doc, equalTo(1));
         assertThat(topDocs.scoreDocs[1].doc, equalTo(0));
         assertThat(topDocs.scoreDocs[2].doc, equalTo(2));
 
         topDocs = searcher.search(new MatchAllDocsQuery(), 10,
-                new Sort(new SortField("value", indexFieldData.comparatorSource(null, SortMode.MAX), true)));
+                new Sort(new SortField("value", indexFieldData.comparatorSource(null, MultiValueMode.MAX), true)));
         assertThat(topDocs.totalHits, equalTo(3));
         assertThat(topDocs.scoreDocs[0].doc, equalTo(2));
         assertThat(topDocs.scoreDocs[1].doc, equalTo(0));
@@ -92,8 +103,6 @@ public abstract class AbstractNumericFieldDataTests extends AbstractFieldDataImp
         fillSingleValueWithMissing();
         IndexNumericFieldData indexFieldData = getForField("value");
         AtomicNumericFieldData fieldData = indexFieldData.load(refreshReader());
-
-        assertThat(fieldData.getNumDocs(), equalTo(3));
 
         LongValues longValues = fieldData.getLongValues();
 
@@ -118,47 +127,47 @@ public abstract class AbstractNumericFieldDataTests extends AbstractFieldDataImp
 
         assertThat(1, equalTo(doubleValues.setDocument(2)));
         assertThat(doubleValues.nextValue(), equalTo(3d));
-        
+
         IndexSearcher searcher = new IndexSearcher(readerContext.reader());
         TopFieldDocs topDocs;
 
         topDocs = searcher.search(new MatchAllDocsQuery(), 10,
-                new Sort(new SortField("value", indexFieldData.comparatorSource(null, SortMode.MIN)))); // defaults to _last
+                new Sort(new SortField("value", indexFieldData.comparatorSource(null, MultiValueMode.MIN)))); // defaults to _last
         assertThat(topDocs.totalHits, equalTo(3));
         assertThat(topDocs.scoreDocs[0].doc, equalTo(0));
         assertThat(topDocs.scoreDocs[1].doc, equalTo(2));
         assertThat(topDocs.scoreDocs[2].doc, equalTo(1));
 
         topDocs = searcher.search(new MatchAllDocsQuery(), 10,
-                new Sort(new SortField("value", indexFieldData.comparatorSource(null, SortMode.MAX), true))); // defaults to _last
+                new Sort(new SortField("value", indexFieldData.comparatorSource(null, MultiValueMode.MAX), true))); // defaults to _last
         assertThat(topDocs.totalHits, equalTo(3));
         assertThat(topDocs.scoreDocs[0].doc, equalTo(2));
         assertThat(topDocs.scoreDocs[1].doc, equalTo(0));
         assertThat(topDocs.scoreDocs[2].doc, equalTo(1));
 
         topDocs = searcher.search(new MatchAllDocsQuery(), 10,
-                new Sort(new SortField("value", indexFieldData.comparatorSource("_first", SortMode.MIN))));
+                new Sort(new SortField("value", indexFieldData.comparatorSource("_first", MultiValueMode.MIN))));
         assertThat(topDocs.totalHits, equalTo(3));
         assertThat(topDocs.scoreDocs[0].doc, equalTo(1));
         assertThat(topDocs.scoreDocs[1].doc, equalTo(0));
         assertThat(topDocs.scoreDocs[2].doc, equalTo(2));
 
         topDocs = searcher.search(new MatchAllDocsQuery(), 10,
-                new Sort(new SortField("value", indexFieldData.comparatorSource("_first", SortMode.MAX), true)));
+                new Sort(new SortField("value", indexFieldData.comparatorSource("_first", MultiValueMode.MAX), true)));
         assertThat(topDocs.totalHits, equalTo(3));
         assertThat(topDocs.scoreDocs[0].doc, equalTo(1));
         assertThat(topDocs.scoreDocs[1].doc, equalTo(2));
         assertThat(topDocs.scoreDocs[2].doc, equalTo(0));
 
         topDocs = searcher.search(new MatchAllDocsQuery(), 10,
-                new Sort(new SortField("value", indexFieldData.comparatorSource("1", SortMode.MIN))));
+                new Sort(new SortField("value", indexFieldData.comparatorSource("1", MultiValueMode.MIN))));
         assertThat(topDocs.totalHits, equalTo(3));
         assertThat(topDocs.scoreDocs[0].doc, equalTo(1));
         assertThat(topDocs.scoreDocs[1].doc, equalTo(0));
         assertThat(topDocs.scoreDocs[2].doc, equalTo(2));
 
         topDocs = searcher.search(new MatchAllDocsQuery(), 10,
-                new Sort(new SortField("value", indexFieldData.comparatorSource("1", SortMode.MAX), true)));
+                new Sort(new SortField("value", indexFieldData.comparatorSource("1", MultiValueMode.MAX), true)));
         assertThat(topDocs.totalHits, equalTo(3));
         assertThat(topDocs.scoreDocs[0].doc, equalTo(2));
         assertThat(topDocs.scoreDocs[1].doc, equalTo(0));
@@ -170,8 +179,6 @@ public abstract class AbstractNumericFieldDataTests extends AbstractFieldDataImp
         fillMultiValueAllSet();
         IndexNumericFieldData indexFieldData = getForField("value");
         AtomicNumericFieldData fieldData = indexFieldData.load(refreshReader());
-
-        assertThat(fieldData.getNumDocs(), equalTo(3));
 
         LongValues longValues = fieldData.getLongValues();
 
@@ -208,8 +215,6 @@ public abstract class AbstractNumericFieldDataTests extends AbstractFieldDataImp
         IndexNumericFieldData indexFieldData = getForField("value");
         AtomicNumericFieldData fieldData = indexFieldData.load(refreshReader());
 
-        assertThat(fieldData.getNumDocs(), equalTo(3));
-
         LongValues longValues = fieldData.getLongValues();
 
         assertThat(longValues.isMultiValued(), equalTo(true));
@@ -236,7 +241,7 @@ public abstract class AbstractNumericFieldDataTests extends AbstractFieldDataImp
 
         assertThat(1, equalTo(doubleValues.setDocument(2)));
         assertThat(doubleValues.nextValue(), equalTo(3d));
-        
+
     }
 
     @Test
@@ -244,8 +249,6 @@ public abstract class AbstractNumericFieldDataTests extends AbstractFieldDataImp
         fillAllMissing();
         IndexNumericFieldData indexFieldData = getForField("value");
         AtomicNumericFieldData fieldData = indexFieldData.load(refreshReader());
-
-        assertThat(fieldData.getNumDocs(), equalTo(3));
 
         // long values
 
@@ -268,7 +271,7 @@ public abstract class AbstractNumericFieldDataTests extends AbstractFieldDataImp
         assertThat(0, equalTo(doubleValues.setDocument(1)));
 
         assertThat(0, equalTo(doubleValues.setDocument(2)));
-    }        
+    }
 
 
     protected void fillAllMissing() throws Exception {
@@ -292,7 +295,7 @@ public abstract class AbstractNumericFieldDataTests extends AbstractFieldDataImp
 
         IndexSearcher searcher = new IndexSearcher(DirectoryReader.open(writer, true));
         TopFieldDocs topDocs = searcher.search(new MatchAllDocsQuery(), 10,
-                new Sort(new SortField("value", indexFieldData.comparatorSource(null, SortMode.MIN)))); // defaults to _last
+                new Sort(new SortField("value", indexFieldData.comparatorSource(null, MultiValueMode.MIN)))); // defaults to _last
         assertThat(topDocs.totalHits, equalTo(8));
         assertThat(topDocs.scoreDocs.length, equalTo(8));
         assertThat(topDocs.scoreDocs[0].doc, equalTo(7));
@@ -313,7 +316,7 @@ public abstract class AbstractNumericFieldDataTests extends AbstractFieldDataImp
 //        assertThat(((FieldDoc) topDocs.scoreDocs[7]).fields[0], equalTo(null));
 
         topDocs = searcher.search(new MatchAllDocsQuery(), 10,
-                new Sort(new SortField("value", indexFieldData.comparatorSource(null, SortMode.MAX), true))); // defaults to _last
+                new Sort(new SortField("value", indexFieldData.comparatorSource(null, MultiValueMode.MAX), true))); // defaults to _last
         assertThat(topDocs.totalHits, equalTo(8));
         assertThat(topDocs.scoreDocs.length, equalTo(8));
         assertThat(topDocs.scoreDocs[0].doc, equalTo(6));
@@ -335,7 +338,7 @@ public abstract class AbstractNumericFieldDataTests extends AbstractFieldDataImp
 
         searcher = new IndexSearcher(DirectoryReader.open(writer, true));
         topDocs = searcher.search(new MatchAllDocsQuery(), 10,
-                new Sort(new SortField("value", indexFieldData.comparatorSource(null, SortMode.SUM)))); // defaults to _last
+                new Sort(new SortField("value", indexFieldData.comparatorSource(null, MultiValueMode.SUM)))); // defaults to _last
         assertThat(topDocs.totalHits, equalTo(8));
         assertThat(topDocs.scoreDocs.length, equalTo(8));
         assertThat(topDocs.scoreDocs[0].doc, equalTo(7));
@@ -357,7 +360,7 @@ public abstract class AbstractNumericFieldDataTests extends AbstractFieldDataImp
 
         searcher = new IndexSearcher(DirectoryReader.open(writer, true));
         topDocs = searcher.search(new MatchAllDocsQuery(), 10,
-                new Sort(new SortField("value", indexFieldData.comparatorSource(null, SortMode.SUM), true))); // defaults to _last
+                new Sort(new SortField("value", indexFieldData.comparatorSource(null, MultiValueMode.SUM), true))); // defaults to _last
         assertThat(topDocs.totalHits, equalTo(8));
         assertThat(topDocs.scoreDocs.length, equalTo(8));
         assertThat(topDocs.scoreDocs[0].doc, equalTo(6));
@@ -379,7 +382,7 @@ public abstract class AbstractNumericFieldDataTests extends AbstractFieldDataImp
 
         searcher = new IndexSearcher(DirectoryReader.open(writer, true));
         topDocs = searcher.search(new MatchAllDocsQuery(), 10,
-                new Sort(new SortField("value", indexFieldData.comparatorSource(null, SortMode.AVG)))); // defaults to _last
+                new Sort(new SortField("value", indexFieldData.comparatorSource(null, MultiValueMode.AVG)))); // defaults to _last
         assertThat(topDocs.totalHits, equalTo(8));
         assertThat(topDocs.scoreDocs.length, equalTo(8));
         assertThat(topDocs.scoreDocs[0].doc, equalTo(7));
@@ -401,7 +404,7 @@ public abstract class AbstractNumericFieldDataTests extends AbstractFieldDataImp
 
         searcher = new IndexSearcher(DirectoryReader.open(writer, true));
         topDocs = searcher.search(new MatchAllDocsQuery(), 10,
-                new Sort(new SortField("value", indexFieldData.comparatorSource(null, SortMode.AVG), true))); // defaults to _last
+                new Sort(new SortField("value", indexFieldData.comparatorSource(null, MultiValueMode.AVG), true))); // defaults to _last
         assertThat(topDocs.totalHits, equalTo(8));
         assertThat(topDocs.scoreDocs.length, equalTo(8));
         assertThat(topDocs.scoreDocs[0].doc, equalTo(6));
@@ -422,7 +425,7 @@ public abstract class AbstractNumericFieldDataTests extends AbstractFieldDataImp
 //        assertThat(((FieldDoc) topDocs.scoreDocs[7]).fields[0], equalTo(null));
 
         topDocs = searcher.search(new MatchAllDocsQuery(), 10,
-                new Sort(new SortField("value", indexFieldData.comparatorSource("_first", SortMode.MIN))));
+                new Sort(new SortField("value", indexFieldData.comparatorSource("_first", MultiValueMode.MIN))));
         assertThat(topDocs.totalHits, equalTo(8));
         assertThat(topDocs.scoreDocs.length, equalTo(8));
         assertThat(topDocs.scoreDocs[0].doc, equalTo(1));
@@ -435,7 +438,7 @@ public abstract class AbstractNumericFieldDataTests extends AbstractFieldDataImp
         assertThat(topDocs.scoreDocs[7].doc, equalTo(6));
 
         topDocs = searcher.search(new MatchAllDocsQuery(), 10,
-                new Sort(new SortField("value", indexFieldData.comparatorSource("_first", SortMode.MAX), true)));
+                new Sort(new SortField("value", indexFieldData.comparatorSource("_first", MultiValueMode.MAX), true)));
         assertThat(topDocs.totalHits, equalTo(8));
         assertThat(topDocs.scoreDocs.length, equalTo(8));
         assertThat(topDocs.scoreDocs[0].doc, equalTo(1));
@@ -448,7 +451,7 @@ public abstract class AbstractNumericFieldDataTests extends AbstractFieldDataImp
         assertThat(topDocs.scoreDocs[7].doc, equalTo(7));
 
         topDocs = searcher.search(new MatchAllDocsQuery(), 10,
-                new Sort(new SortField("value", indexFieldData.comparatorSource("-9", SortMode.MIN))));
+                new Sort(new SortField("value", indexFieldData.comparatorSource("-9", MultiValueMode.MIN))));
         assertThat(topDocs.totalHits, equalTo(8));
         assertThat(topDocs.scoreDocs.length, equalTo(8));
         assertThat(topDocs.scoreDocs[0].doc, equalTo(7));
@@ -461,7 +464,7 @@ public abstract class AbstractNumericFieldDataTests extends AbstractFieldDataImp
         assertThat(topDocs.scoreDocs[7].doc, equalTo(6));
 
         topDocs = searcher.search(new MatchAllDocsQuery(), 10,
-                new Sort(new SortField("value", indexFieldData.comparatorSource("9", SortMode.MAX), true)));
+                new Sort(new SortField("value", indexFieldData.comparatorSource("9", MultiValueMode.MAX), true)));
         assertThat(topDocs.totalHits, equalTo(8));
         assertThat(topDocs.scoreDocs.length, equalTo(8));
         assertThat(topDocs.scoreDocs[0].doc, equalTo(6));

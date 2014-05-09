@@ -32,8 +32,11 @@
 * https://github.com/Exercise/FOQElasticaBundle[ElasticaBundle]:
   Symfony2 Bundle wrapping Elastica.
 
+* https://drupal.org/project/elasticsearch_connector[Drupal]:
+  Drupal Elasticsearch integration (1.0.0 and later).
+
 * http://drupal.org/project/elasticsearch[Drupal]:
-  Drupal Elasticsearch integration.
+  Drupal Elasticsearch integration (0.90 and earlier).
 
 * https://github.com/refuge/couch_es[couch_es]:
   elasticsearch helper for couchdb based products (apache couchdb, bigcouch & refuge)
@@ -43,6 +46,9 @@
 
 * https://github.com/dadoonet/spring-elasticsearch[Spring Elasticsearch]:
   Spring Factory for Elasticsearch
+
+* https://github.com/spring-projects/spring-data-elasticsearch[Spring Data Elasticsearch]:
+  Spring Data implementation for Elasticsearch
 
 * https://camel.apache.org/elasticsearch.html[Apache Camel Integration]:
   An Apache camel component to integrate elasticsearch
@@ -67,6 +73,9 @@
 * https://github.com/cleverage/play2-elasticsearch[play2-elasticsearch]:
   Elasticsearch module for Play Framework 2.x
 
+* https://github.com/goodow/realtime-search[realtime-search]:
+  Elasticsearch module for Vert.x
+
 * https://github.com/fullscale/dangle[dangle]:
   A set of AngularJS directives that provide common visualizations for elasticsearch based on
   D3.
@@ -76,3 +85,6 @@
 
 * https://github.com/kzwang/elasticsearch-osem[elasticsearch-osem]:
   A Java Object Search Engine Mapping (OSEM) for Elasticsearch
+
+* https://github.com/twitter/storehaus[Twitter Storehaus]:
+  Thin asynchronous scala client for storehaus.

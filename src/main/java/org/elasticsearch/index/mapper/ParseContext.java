@@ -26,6 +26,7 @@ import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.util.BytesRef;
+import org.elasticsearch.ElasticsearchIllegalArgumentException;
 import org.elasticsearch.ElasticsearchIllegalStateException;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.bytes.BytesReference;
@@ -33,7 +34,6 @@ import org.elasticsearch.common.lucene.all.AllEntries;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.index.analysis.AnalysisService;
-import org.elasticsearch.index.mapper.core.AbstractFieldMapper;
 import org.elasticsearch.index.mapper.object.RootObjectMapper;
 
 import java.util.*;
@@ -69,7 +69,7 @@ public class ParseContext {
         /** Add fields so that they can later be fetched using {@link #getByKey(Object)}. */
         public void addWithKey(Object key, IndexableField field) {
             if (keyedFields == null) {
-                keyedFields = new ObjectObjectOpenHashMap<Object, IndexableField>();
+                keyedFields = new ObjectObjectOpenHashMap<>();
             } else if (keyedFields.containsKey(key)) {
                 throw new ElasticsearchIllegalStateException("Only one field can be stored per key");
             }
@@ -83,7 +83,7 @@ public class ParseContext {
         }
 
         public IndexableField[] getFields(String name) {
-            List<IndexableField> f = new ArrayList<IndexableField>();
+            List<IndexableField> f = new ArrayList<>();
             for (IndexableField field : fields) {
                 if (field.name().equals(name)) {
                     f.add(field);
@@ -151,11 +151,12 @@ public class ParseContext {
 
     private StringBuilder stringBuilder = new StringBuilder();
 
-    private Map<String, String> ignoredValues = new HashMap<String, String>();
+    private Map<String, String> ignoredValues = new HashMap<>();
 
     private boolean mappingsModified = false;
     private boolean withinNewMapper = false;
     private boolean withinCopyTo = false;
+    private boolean withinMultiFields = false;
 
     private boolean externalValueSet;
 
@@ -235,6 +236,14 @@ public class ParseContext {
 
     public boolean isWithinCopyTo() {
         return withinCopyTo;
+    }
+
+    public void setWithinMultiFields() {
+        this.withinMultiFields = true;
+    }
+
+    public void clearWithinMultiFields() {
+        this.withinMultiFields = false;
     }
 
     public String index() {
@@ -360,6 +369,9 @@ public class ParseContext {
         if (withinCopyTo) {
             return false;
         }
+        if (withinMultiFields) {
+            return false;
+        }
         if (!docMapper.allFieldMapper().enabled()) {
             return false;
         }
@@ -394,6 +406,23 @@ public class ParseContext {
     public Object externalValue() {
         externalValueSet = false;
         return externalValue;
+    }
+
+    /**
+     * Try to parse an externalValue if any
+     * @param clazz Expected class for external value
+     * @return null if no external value has been set or the value
+     */
+    public <T> T parseExternalValue(Class<T> clazz) {
+        if (!externalValueSet() || externalValue() == null) {
+            return null;
+        }
+
+        if (!clazz.isInstance(externalValue())) {
+            throw new ElasticsearchIllegalArgumentException("illegal external value class ["
+                    + externalValue().getClass().getName() + "]. Should be " + clazz.getName());
+        }
+        return (T) externalValue();
     }
 
     public float docBoost() {

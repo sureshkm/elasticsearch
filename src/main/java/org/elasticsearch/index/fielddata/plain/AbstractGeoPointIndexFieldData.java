@@ -29,7 +29,7 @@ import org.elasticsearch.common.geo.GeoPoint;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.index.Index;
 import org.elasticsearch.index.fielddata.*;
-import org.elasticsearch.index.fielddata.fieldcomparator.SortMode;
+import org.elasticsearch.search.MultiValueMode;
 import org.elasticsearch.index.mapper.FieldMapper.Names;
 
 import java.io.IOException;
@@ -38,19 +38,8 @@ abstract class AbstractGeoPointIndexFieldData extends AbstractIndexFieldData<Ato
 
     protected static class Empty extends AtomicGeoPointFieldData<ScriptDocValues> {
 
-        private final int numDocs;
-
-        Empty(int numDocs) {
-            this.numDocs = numDocs;
-        }
-
         @Override
         public boolean isMultiValued() {
-            return false;
-        }
-
-        @Override
-        public boolean isValuesOrdered() {
             return false;
         }
 
@@ -76,12 +65,7 @@ abstract class AbstractGeoPointIndexFieldData extends AbstractIndexFieldData<Ato
 
         @Override
         public ScriptDocValues getScriptValues() {
-            return ScriptDocValues.EMPTY;
-        }
-
-        @Override
-        public int getNumDocs() {
-            return numDocs;
+            return ScriptDocValues.EMPTY_GEOPOINTS;
         }
 
         @Override
@@ -138,7 +122,7 @@ abstract class AbstractGeoPointIndexFieldData extends AbstractIndexFieldData<Ato
     }
 
     @Override
-    public final XFieldComparatorSource comparatorSource(@Nullable Object missingValue, SortMode sortMode) {
+    public final XFieldComparatorSource comparatorSource(@Nullable Object missingValue, MultiValueMode sortMode) {
         throw new ElasticsearchIllegalArgumentException("can't sort on geo_point field without using specific sorting feature, like geo_distance");
     }
 

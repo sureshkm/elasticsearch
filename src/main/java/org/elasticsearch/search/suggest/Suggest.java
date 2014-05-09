@@ -28,6 +28,7 @@ import org.elasticsearch.common.text.Text;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentBuilderString;
+import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.search.suggest.Suggest.Suggestion.Entry;
 import org.elasticsearch.search.suggest.Suggest.Suggestion.Entry.Option;
 import org.elasticsearch.search.suggest.completion.CompletionSuggestion;
@@ -98,7 +99,7 @@ public class Suggest implements Iterable<Suggest.Suggestion<? extends Entry<? ex
         } else if (suggestions.size() == 1) {
           return (T) (name.equals(suggestions.get(0).name) ? suggestions.get(0) : null);
         } else if (this.suggestMap == null) {
-            suggestMap = new HashMap<String, Suggestion<? extends Entry<? extends Option>>>();
+            suggestMap = new HashMap<>();
             for (Suggest.Suggestion<? extends Entry<? extends Option>> item : suggestions) {
                 suggestMap.put(item.getName(), item);
             }
@@ -109,7 +110,7 @@ public class Suggest implements Iterable<Suggest.Suggestion<? extends Entry<? ex
     @Override
     public void readFrom(StreamInput in) throws IOException {
         final int size = in.readVInt();
-        suggestions = new ArrayList<Suggestion<? extends Entry<? extends Option>>>(size);
+        suggestions = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
             Suggestion<? extends Entry<? extends Option>> suggestion;
             final int type = in.readVInt();
@@ -124,7 +125,7 @@ public class Suggest implements Iterable<Suggest.Suggestion<? extends Entry<? ex
                 suggestion = new PhraseSuggestion();
                 break;
             default:
-                suggestion = new Suggestion<Entry<Option>>();
+                suggestion = new Suggestion<>();
                 break;
             }
             suggestion.readFrom(in);
@@ -168,7 +169,7 @@ public class Suggest implements Iterable<Suggest.Suggestion<? extends Entry<? ex
         for (Suggestion<? extends Entry<? extends Option>> suggestion : suggest) {
             List<Suggestion> list = groupedSuggestions.get(suggestion.getName());
             if (list == null) {
-                list = new ArrayList<Suggest.Suggestion>();
+                list = new ArrayList<>();
                 groupedSuggestions.put(suggestion.getName(), list);
             }
             list.add(suggestion);
@@ -177,7 +178,7 @@ public class Suggest implements Iterable<Suggest.Suggestion<? extends Entry<? ex
     }
 
     public static List<Suggestion<? extends Entry<? extends Option>>> reduce(Map<String, List<Suggest.Suggestion>> groupedSuggestions) {
-        List<Suggestion<? extends Entry<? extends Option>>> reduced = new ArrayList<Suggestion<? extends Entry<? extends Option>>>(groupedSuggestions.size());
+        List<Suggestion<? extends Entry<? extends Option>>> reduced = new ArrayList<>(groupedSuggestions.size());
         for (java.util.Map.Entry<String, List<Suggestion>> unmergedResults : groupedSuggestions.entrySet()) {
             List<Suggestion> value = unmergedResults.getValue();
             Suggestion reduce = value.get(0).reduce(value);
@@ -196,7 +197,7 @@ public class Suggest implements Iterable<Suggest.Suggestion<? extends Entry<? ex
         public static final int TYPE = 0;
         protected String name;
         protected int size;
-        protected final List<T> entries = new ArrayList<T>(5);
+        protected final List<T> entries = new ArrayList<>(5);
 
         public Suggestion() {
         }
@@ -247,7 +248,7 @@ public class Suggest implements Iterable<Suggest.Suggestion<? extends Entry<? ex
             List<T> entries = leader.entries;
             final int size = entries.size();
             Comparator<Option> sortComparator = sortComparator();
-            List<T> currentEntries = new ArrayList<T>();
+            List<T> currentEntries = new ArrayList<>();
             for (int i = 0; i < size; i++) {
                 for (Suggestion<T> suggestion : toReduce) {
                     if(suggestion.entries.size() != size) {
@@ -351,7 +352,7 @@ public class Suggest implements Iterable<Suggest.Suggestion<? extends Entry<? ex
                 this.text = text;
                 this.offset = offset;
                 this.length = length;
-                this.options = new ArrayList<O>(5);
+                this.options = new ArrayList<>(5);
             }
 
             public Entry() {
@@ -369,7 +370,7 @@ public class Suggest implements Iterable<Suggest.Suggestion<? extends Entry<? ex
                 if (toReduce.size() == 1) {
                     return toReduce.get(0);
                 }
-                final Map<O, O> entries = new HashMap<O, O>();
+                final Map<O, O> entries = new HashMap<>();
                 Entry<O> leader = toReduce.get(0);
                 for (Entry<O> entry : toReduce) {
                     if (!leader.text.equals(entry.text)) {
@@ -472,7 +473,7 @@ public class Suggest implements Iterable<Suggest.Suggestion<? extends Entry<? ex
                 offset = in.readVInt();
                 length = in.readVInt();
                 int suggestedWords = in.readVInt();
-                options = new ArrayList<O>(suggestedWords);
+                options = new ArrayList<>(suggestedWords);
                 for (int j = 0; j < suggestedWords; j++) {
                     O newOption = newOption();
                     newOption.readFrom(in);
@@ -649,6 +650,19 @@ public class Suggest implements Iterable<Suggest.Suggestion<? extends Entry<? ex
                     throw new ElasticsearchException("Illegal suggest sort " + id);
                 }
             }
+        }
+    }
+
+    @Override
+    public String toString() {
+        try {
+            XContentBuilder builder = XContentFactory.jsonBuilder().prettyPrint();
+            builder.startObject();
+            toXContent(builder, EMPTY_PARAMS);
+            builder.endObject();
+            return builder.string();
+        } catch (IOException e) {
+            return "{ \"error\" : \"" + e.getMessage() + "\"}";
         }
     }
 }

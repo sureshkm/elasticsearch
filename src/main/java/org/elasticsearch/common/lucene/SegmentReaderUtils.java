@@ -24,23 +24,7 @@ import org.apache.lucene.index.SegmentReader;
 import org.elasticsearch.ElasticsearchIllegalStateException;
 import org.elasticsearch.common.Nullable;
 
-import java.lang.reflect.Field;
-
 public class SegmentReaderUtils {
-
-    private static final Field FILTER_ATOMIC_READER_IN;
-
-    static {
-        Field in = null;
-        try { // and another one bites the dust...
-            in = FilterAtomicReader.class.getDeclaredField("in");
-            in.setAccessible(true);
-        } catch (NoSuchFieldException e) {
-            assert false : "Failed to get field: " + e.getMessage();
-        }
-        FILTER_ATOMIC_READER_IN = in;
-
-    }
 
     /**
      * Tries to extract a segment reader from the given index reader.
@@ -77,11 +61,7 @@ public class SegmentReaderUtils {
             return (SegmentReader) reader;
         } else if (reader instanceof FilterAtomicReader) {
             final FilterAtomicReader fReader = (FilterAtomicReader) reader;
-            try {
-                return FILTER_ATOMIC_READER_IN == null ? null :
-                        segmentReader((AtomicReader) FILTER_ATOMIC_READER_IN.get(fReader));
-            } catch (IllegalAccessException e) {
-            }
+            return segmentReader(FilterAtomicReader.unwrap(fReader));
         }
         if (fail) {
             // hard fail - we can't get a SegmentReader

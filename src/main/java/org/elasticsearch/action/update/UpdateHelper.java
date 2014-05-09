@@ -98,15 +98,17 @@ public class UpdateHelper extends AbstractComponent {
                     .refresh(request.refresh())
                     .replicationType(request.replicationType()).consistencyLevel(request.consistencyLevel());
             indexRequest.operationThreaded(false);
-            if (request.versionType() == VersionType.EXTERNAL) {
-                // in external versioning mode, we want to create the new document using the given version.
-                indexRequest.version(request.version()).versionType(VersionType.EXTERNAL);
+            if (request.versionType() != VersionType.INTERNAL) {
+                // in all but the internal versioning mode, we want to create the new document using the given version.
+                indexRequest.version(request.version()).versionType(request.versionType());
             }
             return new Result(indexRequest, Operation.UPSERT, null, null);
         }
 
         long updateVersion = getResult.getVersion();
-        if (request.versionType() == VersionType.EXTERNAL) {
+
+        if (request.versionType() != VersionType.INTERNAL) {
+            assert request.versionType() == VersionType.FORCE;
             updateVersion = request.version(); // remember, match_any is excluded by the conflict test
         }
 
@@ -140,7 +142,7 @@ public class UpdateHelper extends AbstractComponent {
             }
             XContentHelper.update(updatedSourceAsMap, indexRequest.sourceAsMap());
         } else {
-            Map<String, Object> ctx = new HashMap<String, Object>(2);
+            Map<String, Object> ctx = new HashMap<>(2);
             ctx.put("_source", sourceAndContent.v2());
 
             try {
@@ -227,7 +229,7 @@ public class UpdateHelper extends AbstractComponent {
                     }
                     GetField getField = fields.get(field);
                     if (getField == null) {
-                        getField = new GetField(field, new ArrayList<Object>(2));
+                        getField = new GetField(field, new ArrayList<>(2));
                         fields.put(field, getField);
                     }
                     getField.getValues().add(value);

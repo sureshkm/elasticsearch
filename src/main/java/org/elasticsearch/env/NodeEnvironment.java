@@ -23,6 +23,7 @@ import com.google.common.collect.Sets;
 import com.google.common.primitives.Ints;
 import org.apache.lucene.store.Lock;
 import org.apache.lucene.store.NativeFSLockFactory;
+import org.apache.lucene.util.IOUtils;
 import org.elasticsearch.ElasticsearchIllegalStateException;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.common.component.AbstractComponent;
@@ -37,6 +38,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  *
@@ -49,6 +51,7 @@ public class NodeEnvironment extends AbstractComponent {
     private final Lock[] locks;
 
     private final int localNodeId;
+    private final AtomicBoolean closed = new AtomicBoolean(false);
 
     @Inject
     public NodeEnvironment(Settings settings, Environment environment) {
@@ -87,11 +90,7 @@ public class NodeEnvironment extends AbstractComponent {
                         // release all the ones that were obtained up until now
                         for (int i = 0; i < locks.length; i++) {
                             if (locks[i] != null) {
-                                try {
-                                    locks[i].release();
-                                } catch (Exception e1) {
-                                    // ignore
-                                }
+                                IOUtils.closeWhileHandlingException(locks[i]);
                             }
                             locks[i] = null;
                         }
@@ -102,13 +101,7 @@ public class NodeEnvironment extends AbstractComponent {
                     lastException = new IOException("failed to obtain lock on " + dir.getAbsolutePath(), e);
                     // release all the ones that were obtained up until now
                     for (int i = 0; i < locks.length; i++) {
-                        if (locks[i] != null) {
-                            try {
-                                locks[i].release();
-                            } catch (Exception e1) {
-                                // ignore
-                            }
-                        }
+                        IOUtils.closeWhileHandlingException(locks[i]);
                         locks[i] = null;
                     }
                     break;
@@ -152,6 +145,7 @@ public class NodeEnvironment extends AbstractComponent {
     }
 
     public File[] nodeDataLocations() {
+        assert assertEnvIsLocked();
         if (nodeFiles == null || locks == null) {
             throw new ElasticsearchIllegalStateException("node is not configured to store local location");
         }
@@ -159,10 +153,12 @@ public class NodeEnvironment extends AbstractComponent {
     }
 
     public File[] indicesLocations() {
+        assert assertEnvIsLocked();
         return nodeIndicesLocations;
     }
 
     public File[] indexLocations(Index index) {
+        assert assertEnvIsLocked();
         File[] indexLocations = new File[nodeFiles.length];
         for (int i = 0; i < nodeFiles.length; i++) {
             indexLocations[i] = new File(new File(nodeFiles[i], "indices"), index.name());
@@ -171,6 +167,7 @@ public class NodeEnvironment extends AbstractComponent {
     }
 
     public File[] shardLocations(ShardId shardId) {
+        assert assertEnvIsLocked();
         File[] shardLocations = new File[nodeFiles.length];
         for (int i = 0; i < nodeFiles.length; i++) {
             shardLocations[i] = new File(new File(new File(nodeFiles[i], "indices"), shardId.index().name()), Integer.toString(shardId.id()));
@@ -182,6 +179,7 @@ public class NodeEnvironment extends AbstractComponent {
         if (nodeFiles == null || locks == null) {
             throw new ElasticsearchIllegalStateException("node is not configured to store local location");
         }
+        assert assertEnvIsLocked();
         Set<String> indices = Sets.newHashSet();
         for (File indicesLocation : nodeIndicesLocations) {
             File[] indicesList = indicesLocation.listFiles();
@@ -201,6 +199,7 @@ public class NodeEnvironment extends AbstractComponent {
         if (nodeFiles == null || locks == null) {
             throw new ElasticsearchIllegalStateException("node is not configured to store local location");
         }
+        assert assertEnvIsLocked();
         Set<ShardId> shardIds = Sets.newHashSet();
         for (File indicesLocation : nodeIndicesLocations) {
             File[] indicesList = indicesLocation.listFiles();
@@ -231,15 +230,30 @@ public class NodeEnvironment extends AbstractComponent {
     }
 
     public void close() {
-        if (locks != null) {
+        if (closed.compareAndSet(false, true) && locks != null) {
             for (Lock lock : locks) {
                 try {
                     logger.trace("releasing lock [{}]", lock);
-                    lock.release();
+                    lock.close();
                 } catch (IOException e) {
                     logger.trace("failed to release lock [{}]", e, lock);
                 }
             }
         }
+    }
+
+
+    private boolean assertEnvIsLocked() {
+        if (!closed.get() && locks != null) {
+            for (Lock lock : locks) {
+                try {
+                    assert lock.isLocked() : "Lock: " + lock + "is not locked";
+                } catch (IOException e) {
+                    logger.warn("lock assertion failed", e);
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 }

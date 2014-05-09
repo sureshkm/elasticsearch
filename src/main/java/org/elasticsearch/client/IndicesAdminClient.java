@@ -53,9 +53,6 @@ import org.elasticsearch.action.admin.indices.exists.types.TypesExistsResponse;
 import org.elasticsearch.action.admin.indices.flush.FlushRequest;
 import org.elasticsearch.action.admin.indices.flush.FlushRequestBuilder;
 import org.elasticsearch.action.admin.indices.flush.FlushResponse;
-import org.elasticsearch.action.admin.indices.gateway.snapshot.GatewaySnapshotRequest;
-import org.elasticsearch.action.admin.indices.gateway.snapshot.GatewaySnapshotRequestBuilder;
-import org.elasticsearch.action.admin.indices.gateway.snapshot.GatewaySnapshotResponse;
 import org.elasticsearch.action.admin.indices.mapping.delete.DeleteMappingRequest;
 import org.elasticsearch.action.admin.indices.mapping.delete.DeleteMappingRequestBuilder;
 import org.elasticsearch.action.admin.indices.mapping.delete.DeleteMappingResponse;
@@ -84,9 +81,9 @@ import org.elasticsearch.action.admin.indices.settings.put.UpdateSettingsRespons
 import org.elasticsearch.action.admin.indices.stats.IndicesStatsRequest;
 import org.elasticsearch.action.admin.indices.stats.IndicesStatsRequestBuilder;
 import org.elasticsearch.action.admin.indices.stats.IndicesStatsResponse;
-import org.elasticsearch.action.admin.indices.status.IndicesStatusRequest;
-import org.elasticsearch.action.admin.indices.status.IndicesStatusRequestBuilder;
-import org.elasticsearch.action.admin.indices.status.IndicesStatusResponse;
+import org.elasticsearch.action.admin.indices.recovery.RecoveryRequest;
+import org.elasticsearch.action.admin.indices.recovery.RecoveryRequestBuilder;
+import org.elasticsearch.action.admin.indices.recovery.RecoveryResponse;
 import org.elasticsearch.action.admin.indices.template.delete.DeleteIndexTemplateRequest;
 import org.elasticsearch.action.admin.indices.template.delete.DeleteIndexTemplateRequestBuilder;
 import org.elasticsearch.action.admin.indices.template.delete.DeleteIndexTemplateResponse;
@@ -185,27 +182,19 @@ public interface IndicesAdminClient {
     IndicesStatsRequestBuilder prepareStats(String... indices);
 
     /**
-     * The status of one or more indices.
-     *
-     * @param request The indices status request
-     * @return The result future
-     * @see Requests#indicesStatusRequest(String...)
+     * Indices recoveries
      */
-    ActionFuture<IndicesStatusResponse> status(IndicesStatusRequest request);
+    ActionFuture<RecoveryResponse> recoveries(RecoveryRequest request);
 
     /**
-     * The status of one or more indices.
-     *
-     * @param request  The indices status request
-     * @param listener A listener to be notified with a result
-     * @see Requests#indicesStatusRequest(String...)
+     *Indices recoveries
      */
-    void status(IndicesStatusRequest request, ActionListener<IndicesStatusResponse> listener);
+    void recoveries(RecoveryRequest request, ActionListener<RecoveryResponse> listener);
 
     /**
-     * The status of one or more indices.
+     * Indices recoveries
      */
-    IndicesStatusRequestBuilder prepareStatus(String... indices);
+    RecoveryRequestBuilder prepareRecoveries(String... indices);
 
     /**
      * The segments of one or more indices.
@@ -276,7 +265,7 @@ public interface IndicesAdminClient {
     /**
      * Deletes an index based on the index name.
      *
-     * @param indices The indices to delete. Empty array to delete all indices.
+     * @param indices The indices to delete. Use "_all" to delete all indices.
      */
     DeleteIndexRequestBuilder prepareDelete(String... indices);
 
@@ -474,36 +463,6 @@ public interface IndicesAdminClient {
      * Deletes mapping definition for a type into one or more indices.
      */
     DeleteMappingRequestBuilder prepareDeleteMapping(String... indices);
-
-    /**
-     * Explicitly perform gateway snapshot for one or more indices.
-     *
-     * @param request The gateway snapshot request
-     * @return The result future
-     * @see org.elasticsearch.client.Requests#gatewaySnapshotRequest(String...)
-     * @deprecated Use snapshot/restore API instead
-     */
-    @Deprecated
-    ActionFuture<GatewaySnapshotResponse> gatewaySnapshot(GatewaySnapshotRequest request);
-
-    /**
-     * Explicitly perform gateway snapshot for one or more indices.
-     *
-     * @param request  The gateway snapshot request
-     * @param listener A listener to be notified with a result
-     * @see org.elasticsearch.client.Requests#gatewaySnapshotRequest(String...)
-     * @deprecated Use snapshot/restore API instead
-     */
-    @Deprecated
-    void gatewaySnapshot(GatewaySnapshotRequest request, ActionListener<GatewaySnapshotResponse> listener);
-
-    /**
-     * Explicitly perform gateway snapshot for one or more indices.
-     *
-     * @deprecated Use snapshot/restore API instead
-     */
-    @Deprecated
-    GatewaySnapshotRequestBuilder prepareGatewaySnapshot(String... indices);
 
     /**
      * Allows to add/remove aliases from indices.

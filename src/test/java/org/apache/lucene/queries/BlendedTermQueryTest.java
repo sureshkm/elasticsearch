@@ -32,18 +32,21 @@ import org.apache.lucene.search.similarities.BM25Similarity;
 import org.apache.lucene.search.similarities.DefaultSimilarity;
 import org.apache.lucene.search.similarities.Similarity;
 import org.apache.lucene.store.Directory;
-import org.apache.lucene.util._TestUtil;
+import org.apache.lucene.util.TestUtil;
 import org.elasticsearch.test.ElasticsearchLuceneTestCase;
+import org.junit.Test;
 
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
+
+import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.equalTo;
 
 /**
  */
 public class BlendedTermQueryTest extends ElasticsearchLuceneTestCase {
 
+    @Test
     public void testBooleanQuery() throws IOException {
         Directory dir = newDirectory();
         IndexWriter w = new IndexWriter(dir, newIndexWriterConfig(TEST_VERSION_CURRENT, new MockAnalyzer(random())));
@@ -60,11 +63,12 @@ public class BlendedTermQueryTest extends ElasticsearchLuceneTestCase {
             d.add(new TextField("surname", surNames[i], Field.Store.NO));
             w.addDocument(d);
         }
-        int iters = atLeast(25);
+        int iters = scaledRandomIntBetween(25, 100);
         for (int j = 0; j < iters; j++) {
             Document d = new Document();
             d.add(new TextField("id", Integer.toString(firstNames.length + j), Field.Store.YES));
-            d.add(new TextField("firstname", rarely() ? "some_other_name" : "simon", Field.Store.NO));
+            d.add(new TextField("firstname", rarely() ? "some_other_name" :
+                    "simon the sorcerer", Field.Store.NO)); // make sure length-norm is the tie-breaker
             d.add(new TextField("surname", "bogus", Field.Store.NO));
             w.addDocument(d);
         }
@@ -95,6 +99,7 @@ public class BlendedTermQueryTest extends ElasticsearchLuceneTestCase {
 
     }
 
+    @Test
     public void testDismaxQuery() throws IOException {
         Directory dir = newDirectory();
         IndexWriter w = new IndexWriter(dir, newIndexWriterConfig(TEST_VERSION_CURRENT, new MockAnalyzer(random())));
@@ -119,7 +124,7 @@ public class BlendedTermQueryTest extends ElasticsearchLuceneTestCase {
             d.add(new Field("song", song[i], ft));
             w.addDocument(d);
         }
-        int iters = atLeast(25);
+        int iters = scaledRandomIntBetween(25, 100);
         for (int j = 0; j < iters; j++) {
             Document d = new Document();
             d.add(new TextField("id", Integer.toString(username.length + j), Field.Store.YES));
@@ -165,14 +170,15 @@ public class BlendedTermQueryTest extends ElasticsearchLuceneTestCase {
         dir.close();
     }
 
+    @Test
     public void testBasics() {
-        final int iters = atLeast(5);
+        final int iters = scaledRandomIntBetween(5, 25);
         for (int j = 0; j < iters; j++) {
             String[] fields = new String[1 + random().nextInt(10)];
             for (int i = 0; i < fields.length; i++) {
-                fields[i] = _TestUtil.randomRealisticUnicodeString(random(), 1, 10);
+                fields[i] = TestUtil.randomRealisticUnicodeString(random(), 1, 10);
             }
-            String term = _TestUtil.randomRealisticUnicodeString(random(), 1, 10);
+            String term = TestUtil.randomRealisticUnicodeString(random(), 1, 10);
             Term[] terms = toTerms(fields, term);
             boolean disableCoord = random().nextBoolean();
             boolean useBoolean = random().nextBoolean();
@@ -200,5 +206,21 @@ public class BlendedTermQueryTest extends ElasticsearchLuceneTestCase {
         Similarity similarity = random().nextBoolean() ? new BM25Similarity() : new DefaultSimilarity();
         searcher.setSimilarity(similarity);
         return searcher;
+    }
+
+    @Test
+    public void testExtractTerms() {
+        Set<Term> terms = new HashSet<>();
+        int num = scaledRandomIntBetween(1, 10);
+        for (int i = 0; i < num; i++) {
+            terms.add(new Term(TestUtil.randomRealisticUnicodeString(random(), 1, 10), TestUtil.randomRealisticUnicodeString(random(), 1, 10)));
+        }
+
+        BlendedTermQuery blendedTermQuery = random().nextBoolean() ? BlendedTermQuery.dismaxBlendedQuery(terms.toArray(new Term[0]), random().nextFloat()) :
+                BlendedTermQuery.booleanBlendedQuery(terms.toArray(new Term[0]), random().nextBoolean());
+        Set<Term> extracted = new HashSet<>();
+        blendedTermQuery.extractTerms(extracted);
+        assertThat(extracted.size(), equalTo(terms.size()));
+        assertThat(extracted, containsInAnyOrder(terms.toArray(new Term[0])));
     }
 }

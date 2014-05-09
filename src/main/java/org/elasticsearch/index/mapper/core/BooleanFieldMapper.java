@@ -21,6 +21,7 @@ package org.elasticsearch.index.mapper.core;
 
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.FieldType;
+import org.apache.lucene.document.XStringField;
 import org.apache.lucene.index.FieldInfo.IndexOptions;
 import org.apache.lucene.queries.TermFilter;
 import org.apache.lucene.search.Filter;
@@ -36,9 +37,7 @@ import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.index.codec.docvaluesformat.DocValuesFormatProvider;
 import org.elasticsearch.index.codec.postingsformat.PostingsFormatProvider;
 import org.elasticsearch.index.fielddata.FieldDataType;
-import org.elasticsearch.index.mapper.Mapper;
-import org.elasticsearch.index.mapper.MapperParsingException;
-import org.elasticsearch.index.mapper.ParseContext;
+import org.elasticsearch.index.mapper.*;
 import org.elasticsearch.index.similarity.SimilarityProvider;
 
 import java.io.IOException;
@@ -207,19 +206,35 @@ public class BooleanFieldMapper extends AbstractFieldMapper<Boolean> {
         if (!fieldType().indexed() && !fieldType().stored()) {
             return;
         }
-        XContentParser.Token token = context.parser().currentToken();
-        String value = null;
-        if (token == XContentParser.Token.VALUE_NULL) {
-            if (nullValue != null) {
-                value = nullValue ? "T" : "F";
+
+        Boolean value = context.parseExternalValue(Boolean.class);
+        if (value == null) {
+            XContentParser.Token token = context.parser().currentToken();
+            if (token == XContentParser.Token.VALUE_NULL) {
+                if (nullValue != null) {
+                    value = nullValue;
+                }
+            } else {
+                value = context.parser().booleanValue();
             }
-        } else {
-            value = context.parser().booleanValue() ? "T" : "F";
         }
+
         if (value == null) {
             return;
         }
-        fields.add(new Field(names.indexName(), value, fieldType));
+        fields.add(new XStringField(names.indexName(), value ? "T" : "F", fieldType));
+    }
+
+    @Override
+    public void merge(Mapper mergeWith, MergeContext mergeContext) throws MergeMappingException {
+        super.merge(mergeWith, mergeContext);
+        if (!this.getClass().equals(mergeWith.getClass())) {
+            return;
+        }
+
+        if (!mergeContext.mergeFlags().simulate()) {
+            this.nullValue = ((BooleanFieldMapper) mergeWith).nullValue;
+        }
     }
 
     @Override

@@ -20,16 +20,15 @@ package org.elasticsearch.search.aggregations.metrics.min;
 
 import org.apache.lucene.index.AtomicReaderContext;
 import org.elasticsearch.common.lease.Releasables;
-import org.elasticsearch.common.util.BigArrays;
 import org.elasticsearch.common.util.DoubleArray;
 import org.elasticsearch.index.fielddata.DoubleValues;
 import org.elasticsearch.search.aggregations.Aggregator;
 import org.elasticsearch.search.aggregations.InternalAggregation;
 import org.elasticsearch.search.aggregations.metrics.MetricsAggregator;
 import org.elasticsearch.search.aggregations.support.AggregationContext;
-import org.elasticsearch.search.aggregations.support.ValueSourceAggregatorFactory;
+import org.elasticsearch.search.aggregations.support.ValuesSource;
+import org.elasticsearch.search.aggregations.support.ValuesSourceAggregatorFactory;
 import org.elasticsearch.search.aggregations.support.ValuesSourceConfig;
-import org.elasticsearch.search.aggregations.support.numeric.NumericValuesSource;
 
 import java.io.IOException;
 
@@ -38,17 +37,17 @@ import java.io.IOException;
  */
 public class MinAggregator extends MetricsAggregator.SingleValue {
 
-    private final NumericValuesSource valuesSource;
+    private final ValuesSource.Numeric valuesSource;
     private DoubleValues values;
 
     private DoubleArray mins;
 
-    public MinAggregator(String name, long estimatedBucketsCount, NumericValuesSource valuesSource, AggregationContext context, Aggregator parent) {
+    public MinAggregator(String name, long estimatedBucketsCount, ValuesSource.Numeric valuesSource, AggregationContext context, Aggregator parent) {
         super(name, estimatedBucketsCount, context, parent);
         this.valuesSource = valuesSource;
         if (valuesSource != null) {
             final long initialSize = estimatedBucketsCount < 2 ? 1 : estimatedBucketsCount;
-            mins = BigArrays.newDoubleArray(initialSize, context.pageCacheRecycler(), false);
+            mins = bigArrays.newDoubleArray(initialSize, false);
             mins.fill(0, mins.size(), Double.POSITIVE_INFINITY);
         }
     }
@@ -71,7 +70,7 @@ public class MinAggregator extends MetricsAggregator.SingleValue {
 
         if (owningBucketOrdinal >= mins.size()) {
             long from = mins.size();
-            mins = BigArrays.grow(mins, owningBucketOrdinal + 1);
+            mins = bigArrays.grow(mins, owningBucketOrdinal + 1);
             mins.fill(from, mins.size(), Double.POSITIVE_INFINITY);
         }
 
@@ -80,7 +79,7 @@ public class MinAggregator extends MetricsAggregator.SingleValue {
 
     @Override
     public double metric(long owningBucketOrd) {
-        return mins.get(owningBucketOrd);
+        return valuesSource == null ? Double.POSITIVE_INFINITY : mins.get(owningBucketOrd);
     }
 
     @Override
@@ -97,9 +96,9 @@ public class MinAggregator extends MetricsAggregator.SingleValue {
         return new InternalMin(name, Double.POSITIVE_INFINITY);
     }
 
-    public static class Factory extends ValueSourceAggregatorFactory.LeafOnly<NumericValuesSource> {
+    public static class Factory extends ValuesSourceAggregatorFactory.LeafOnly<ValuesSource.Numeric> {
 
-        public Factory(String name, ValuesSourceConfig<NumericValuesSource> valuesSourceConfig) {
+        public Factory(String name, ValuesSourceConfig<ValuesSource.Numeric> valuesSourceConfig) {
             super(name, InternalMin.TYPE.name(), valuesSourceConfig);
         }
 
@@ -109,13 +108,13 @@ public class MinAggregator extends MetricsAggregator.SingleValue {
         }
 
         @Override
-        protected Aggregator create(NumericValuesSource valuesSource, long expectedBucketsCount, AggregationContext aggregationContext, Aggregator parent) {
+        protected Aggregator create(ValuesSource.Numeric valuesSource, long expectedBucketsCount, AggregationContext aggregationContext, Aggregator parent) {
             return new MinAggregator(name, expectedBucketsCount, valuesSource, aggregationContext, parent);
         }
     }
 
     @Override
-    public void doRelease() {
-        Releasables.release(mins);
+    public void doClose() {
+        Releasables.close(mins);
     }
 }

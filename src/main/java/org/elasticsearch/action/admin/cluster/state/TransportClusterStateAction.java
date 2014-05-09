@@ -21,12 +21,12 @@ package org.elasticsearch.action.admin.cluster.state;
 
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.ActionListener;
+import org.elasticsearch.action.support.IndicesOptions;
 import org.elasticsearch.action.support.master.TransportMasterNodeReadOperationAction;
 import org.elasticsearch.cluster.ClusterName;
 import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
-import org.elasticsearch.cluster.metadata.IndexTemplateMetaData;
 import org.elasticsearch.cluster.metadata.MetaData;
 import org.elasticsearch.cluster.routing.RoutingTable;
 import org.elasticsearch.common.inject.Inject;
@@ -73,7 +73,7 @@ public class TransportClusterStateAction extends TransportMasterNodeReadOperatio
     protected void masterOperation(final ClusterStateRequest request, final ClusterState state, ActionListener<ClusterStateResponse> listener) throws ElasticsearchException {
         ClusterState currentState = clusterService.state();
         logger.trace("Serving cluster state request using version {}", currentState.version());
-        ClusterState.Builder builder = ClusterState.builder();
+        ClusterState.Builder builder = ClusterState.builder(currentState.getClusterName());
         builder.version(currentState.version());
         if (request.nodes()) {
             builder.nodes(currentState.nodes());
@@ -90,34 +90,24 @@ public class TransportClusterStateAction extends TransportMasterNodeReadOperatio
             } else {
                 builder.routingTable(currentState.routingTable());
             }
-            builder.allocationExplanation(currentState.allocationExplanation());
         }
         if (request.blocks()) {
             builder.blocks(currentState.blocks());
         }
         if (request.metaData()) {
             MetaData.Builder mdBuilder;
-            if (request.indices().length == 0 && request.indexTemplates().length == 0) {
+            if (request.indices().length == 0) {
                 mdBuilder = MetaData.builder(currentState.metaData());
             } else {
                 mdBuilder = MetaData.builder();
             }
 
             if (request.indices().length > 0) {
-                String[] indices = currentState.metaData().concreteIndicesIgnoreMissing(request.indices());
+                String[] indices = currentState.metaData().concreteIndices(request.indices(), IndicesOptions.lenientExpandOpen());
                 for (String filteredIndex : indices) {
                     IndexMetaData indexMetaData = currentState.metaData().index(filteredIndex);
                     if (indexMetaData != null) {
                         mdBuilder.put(indexMetaData, false);
-                    }
-                }
-            }
-
-            if (request.indexTemplates().length > 0) {
-                for (String templateName : request.indexTemplates()) {
-                    IndexTemplateMetaData indexTemplateMetaData = currentState.metaData().templates().get(templateName);
-                    if (indexTemplateMetaData != null) {
-                        mdBuilder.put(indexTemplateMetaData);
                     }
                 }
             }

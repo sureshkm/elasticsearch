@@ -29,6 +29,8 @@ import org.elasticsearch.test.ElasticsearchIntegrationTest;
 import org.junit.Test;
 
 import static org.elasticsearch.client.Requests.*;
+import static org.elasticsearch.cluster.metadata.IndexMetaData.SETTING_NUMBER_OF_REPLICAS;
+import static org.elasticsearch.cluster.metadata.IndexMetaData.SETTING_NUMBER_OF_SHARDS;
 import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
 import static org.elasticsearch.index.query.FilterBuilders.termFilter;
 import static org.elasticsearch.index.query.QueryBuilders.moreLikeThisFieldQuery;
@@ -67,7 +69,7 @@ public class MoreLikeThisActionTests extends ElasticsearchIntegrationTest {
     @Test
     public void testSimpleMoreLikeOnLongField() throws Exception {
         logger.info("Creating index test");
-        createIndex("test");
+        assertAcked(prepareCreate("test").addMapping("type1", "some_long", "type=long"));
         logger.info("Running Cluster Health");
         assertThat(ensureGreen(), equalTo(ClusterHealthStatus.GREEN));
 
@@ -177,10 +179,9 @@ public class MoreLikeThisActionTests extends ElasticsearchIntegrationTest {
                 .startObject("properties")
                 .endObject()
                 .endObject().endObject().string();
-        prepareCreate("foo", 2, ImmutableSettings.builder().put("index.number_of_replicas", 0)
-                .put("index.number_of_shards", 2))
-                .addMapping("bar", mapping)
-                .execute().actionGet();
+        assertAcked(prepareCreate("foo", 2,
+                ImmutableSettings.builder().put(SETTING_NUMBER_OF_SHARDS, 2).put(SETTING_NUMBER_OF_REPLICAS, 0))
+                .addMapping("bar", mapping));
         ensureGreen();
 
         client().prepareIndex("foo", "bar", "1")

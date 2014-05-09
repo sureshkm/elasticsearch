@@ -20,16 +20,16 @@ package org.elasticsearch.index.search.child;
 
 import org.apache.lucene.search.Filter;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.Sort;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.search.SearchType;
 import org.elasticsearch.cache.recycler.CacheRecycler;
 import org.elasticsearch.cache.recycler.PageCacheRecycler;
-import org.elasticsearch.common.lease.Releasable;
+import org.elasticsearch.common.util.BigArrays;
 import org.elasticsearch.index.analysis.AnalysisService;
 import org.elasticsearch.index.cache.docset.DocSetCache;
 import org.elasticsearch.index.cache.filter.FilterCache;
-import org.elasticsearch.index.cache.id.IdCache;
 import org.elasticsearch.index.fielddata.IndexFieldDataService;
 import org.elasticsearch.index.mapper.FieldMapper;
 import org.elasticsearch.index.mapper.FieldMappers;
@@ -67,32 +67,30 @@ public class TestSearchContext extends SearchContext {
 
     final CacheRecycler cacheRecycler;
     final PageCacheRecycler pageCacheRecycler;
-    final IdCache idCache;
+    final BigArrays bigArrays;
     final IndexService indexService;
     final FilterCache filterCache;
+    final IndexFieldDataService indexFieldDataService;
 
     ContextIndexSearcher searcher;
     int size;
 
-    public TestSearchContext(CacheRecycler cacheRecycler, PageCacheRecycler pageCacheRecycler, IdCache idCache, IndexService indexService, FilterCache filterCache) {
+    public TestSearchContext(CacheRecycler cacheRecycler, PageCacheRecycler pageCacheRecycler, BigArrays bigArrays, IndexService indexService, FilterCache filterCache, IndexFieldDataService indexFieldDataService) {
         this.cacheRecycler = cacheRecycler;
         this.pageCacheRecycler = pageCacheRecycler;
-        this.idCache = idCache;
+        this.bigArrays = bigArrays;
         this.indexService = indexService;
         this.filterCache = filterCache;
+        this.indexFieldDataService = indexFieldDataService;
     }
 
     public TestSearchContext() {
         this.cacheRecycler = null;
         this.pageCacheRecycler = null;
-        this.idCache = null;
+        this.bigArrays = null;
         this.indexService = null;
         this.filterCache = null;
-    }
-
-    @Override
-    public boolean clearAndRelease() {
-        return false;
+        this.indexFieldDataService = null;
     }
 
     @Override
@@ -321,6 +319,11 @@ public class TestSearchContext extends SearchContext {
     }
 
     @Override
+    public BigArrays bigArrays() {
+        return bigArrays;
+    }
+
+    @Override
     public FilterCache filterCache() {
         return filterCache;
     }
@@ -332,12 +335,7 @@ public class TestSearchContext extends SearchContext {
 
     @Override
     public IndexFieldDataService fieldData() {
-        return null;
-    }
-
-    @Override
-    public IdCache idCache() {
-        return idCache;
+        return indexFieldDataService;
     }
 
     @Override
@@ -524,6 +522,15 @@ public class TestSearchContext extends SearchContext {
     }
 
     @Override
+    public void lastEmittedDoc(ScoreDoc doc) {
+    }
+
+    @Override
+    public ScoreDoc lastEmittedDoc() {
+        return null;
+    }
+
+    @Override
     public SearchLookup lookup() {
         return null;
     }
@@ -541,14 +548,6 @@ public class TestSearchContext extends SearchContext {
     @Override
     public FetchSearchResult fetchResult() {
         return null;
-    }
-
-    @Override
-    public void addReleasable(Releasable releasable) {
-    }
-
-    @Override
-    public void clearReleasables() {
     }
 
     @Override
@@ -577,7 +576,17 @@ public class TestSearchContext extends SearchContext {
     }
 
     @Override
-    public boolean release() throws ElasticsearchException {
+    public void doClose() throws ElasticsearchException {
+        // no-op
+    }
+
+    @Override
+    public boolean useSlowScroll() {
         return false;
+    }
+
+    @Override
+    public SearchContext useSlowScroll(boolean useSlowScroll) {
+        return null;
     }
 }

@@ -70,7 +70,7 @@ import static org.elasticsearch.cluster.metadata.MetaDataIndexStateService.INDEX
  * {@link org.elasticsearch.index.gateway.IndexShardGatewayService#recover(boolean, org.elasticsearch.index.gateway.IndexShardGatewayService.RecoveryListener)}
  * method, which detects that shard should be restored from snapshot rather than recovered from gateway by looking
  * at the {@link org.elasticsearch.cluster.routing.ShardRouting#restoreSource()} property. If this property is not null
- * {@code recover} method uses {@link org.elasticsearch.index.snapshots.IndexShardSnapshotAndRestoreService#restore(org.elasticsearch.index.gateway.RecoveryStatus)}
+ * {@code recover} method uses {@link org.elasticsearch.index.snapshots.IndexShardSnapshotAndRestoreService#restore(org.elasticsearch.index.gateway.RecoveryState)}
  * method to start shard restore process.
  * <p/>
  * At the end of the successful restore process {@code IndexShardSnapshotAndRestoreService} calls {@link #indexShardRestoreCompleted(SnapshotId, ShardId)},
@@ -89,7 +89,7 @@ public class RestoreService extends AbstractComponent implements ClusterStateLis
 
     private final MetaDataCreateIndexService createIndexService;
 
-    private final CopyOnWriteArrayList<RestoreCompletionListener> listeners = new CopyOnWriteArrayList<RestoreCompletionListener>();
+    private final CopyOnWriteArrayList<RestoreCompletionListener> listeners = new CopyOnWriteArrayList<>();
 
     @Inject
     public RestoreService(Settings settings, ClusterService clusterService, RepositoriesService repositoriesService, TransportService transportService, AllocationService allocationService, MetaDataCreateIndexService createIndexService) {
@@ -191,10 +191,11 @@ public class RestoreService extends AbstractComponent implements ClusterStateLis
                                             "] shard from snapshot with [" + snapshotIndexMetaData.getNumberOfShards() + "] shards");
                                 }
                                 // Index exists and it's closed - open it in metadata and start recovery
-                                IndexMetaData.Builder indexMdBuilder = IndexMetaData.builder(currentIndexMetaData).state(IndexMetaData.State.OPEN);
+                                IndexMetaData.Builder indexMdBuilder = IndexMetaData.builder(snapshotIndexMetaData).state(IndexMetaData.State.OPEN);
+                                indexMdBuilder.version(Math.max(snapshotIndexMetaData.version(), currentIndexMetaData.version() + 1));
                                 IndexMetaData updatedIndexMetaData = indexMdBuilder.index(renamedIndex).build();
                                 rtBuilder.addAsRestore(updatedIndexMetaData, restoreSource);
-                                blocks.removeIndexBlock(index, INDEX_CLOSED_BLOCK);
+                                blocks.removeIndexBlock(renamedIndex, INDEX_CLOSED_BLOCK);
                                 mdBuilder.put(updatedIndexMetaData, true);
                             }
                             for (int shard = 0; shard < snapshotIndexMetaData.getNumberOfShards(); shard++) {
@@ -484,7 +485,7 @@ public class RestoreService extends AbstractComponent implements ClusterStateLis
 
         private String renameReplacement;
 
-        private IndicesOptions indicesOptions = IndicesOptions.strict();
+        private IndicesOptions indicesOptions = IndicesOptions.strictExpandOpen();
 
         private Settings settings;
 

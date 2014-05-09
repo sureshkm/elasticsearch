@@ -24,15 +24,12 @@ import com.carrotsearch.hppc.cursors.ObjectIntCursor;
 import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.common.geo.GeoHashUtils;
-import org.elasticsearch.common.settings.ImmutableSettings;
-import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.index.query.GeoBoundingBoxFilterBuilder;
 import org.elasticsearch.search.aggregations.AggregationBuilders;
 import org.elasticsearch.search.aggregations.bucket.filter.Filter;
 import org.elasticsearch.search.aggregations.bucket.geogrid.GeoHashGrid;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
-import org.junit.Before;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -41,21 +38,13 @@ import java.util.Random;
 
 import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
 import static org.elasticsearch.search.aggregations.AggregationBuilders.geohashGrid;
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertSearchResponse;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 
-/**
- *
- */
+@ElasticsearchIntegrationTest.SuiteScopeTest
 public class GeoHashGridTests extends ElasticsearchIntegrationTest {
-
-    @Override
-    public Settings indexSettings() {
-        return ImmutableSettings.builder()
-                .put("index.number_of_shards", between(1, 5))
-                .put("index.number_of_replicas", between(0, 1))
-                .build();
-    }
 
     private IndexRequestBuilder indexCity(String name, String latLon) throws Exception {
         XContentBuilder source = jsonBuilder().startObject().field("city", name);
@@ -67,23 +56,22 @@ public class GeoHashGridTests extends ElasticsearchIntegrationTest {
     }
 
 
-    ObjectIntMap<String> expectedDocCountsForGeoHash = null;
-    int highestPrecisionGeohash = 12;
-    int numRandomPoints = 100;
+    static ObjectIntMap<String> expectedDocCountsForGeoHash = null;
+    static int highestPrecisionGeohash = 12;
+    static int numRandomPoints = 100;
 
-    String smallestGeoHash = null;
+    static String smallestGeoHash = null;
 
-    @Before
-    public void init() throws Exception {
-        prepareCreate("idx")
-                .addMapping("type", "location", "type=geo_point", "city", "type=string,index=not_analyzed")
-                .execute().actionGet();
+    @Override
+    public void setupSuiteScopeCluster() throws Exception {
+        assertAcked(prepareCreate("idx")
+                .addMapping("type", "location", "type=geo_point", "city", "type=string,index=not_analyzed"));
 
         createIndex("idx_unmapped");
 
-        List<IndexRequestBuilder> cities = new ArrayList<IndexRequestBuilder>();
+        List<IndexRequestBuilder> cities = new ArrayList<>();
         Random random = getRandom();
-        expectedDocCountsForGeoHash = new ObjectIntOpenHashMap<String>(numRandomPoints * 2);
+        expectedDocCountsForGeoHash = new ObjectIntOpenHashMap<>(numRandomPoints * 2);
         for (int i = 0; i < numRandomPoints; i++) {
             //generate random point
             double lat = (180d * random.nextDouble()) - 90d;
@@ -116,7 +104,7 @@ public class GeoHashGridTests extends ElasticsearchIntegrationTest {
                     )
                     .execute().actionGet();
 
-            assertThat(response.getFailedShards(), equalTo(0));
+            assertSearchResponse(response);
 
             GeoHashGrid geoGrid = response.getAggregations().get("geohashgrid");
             for (GeoHashGrid.Bucket cell : geoGrid.getBuckets()) {
@@ -147,8 +135,7 @@ public class GeoHashGridTests extends ElasticsearchIntegrationTest {
                     )
                     .execute().actionGet();
 
-            assertThat(response.getFailedShards(), equalTo(0));
-
+            assertSearchResponse(response);
 
             Filter filter = response.getAggregations().get("filtered");
 
@@ -176,7 +163,7 @@ public class GeoHashGridTests extends ElasticsearchIntegrationTest {
                     )
                     .execute().actionGet();
 
-            assertThat(response.getFailedShards(), equalTo(0));
+            assertSearchResponse(response);
 
             GeoHashGrid geoGrid = response.getAggregations().get("geohashgrid");
             assertThat(geoGrid.getBuckets().size(), equalTo(0));
@@ -194,7 +181,7 @@ public class GeoHashGridTests extends ElasticsearchIntegrationTest {
                     )
                     .execute().actionGet();
 
-            assertThat(response.getFailedShards(), equalTo(0));
+            assertSearchResponse(response);
 
             GeoHashGrid geoGrid = response.getAggregations().get("geohashgrid");
             for (GeoHashGrid.Bucket cell : geoGrid.getBuckets()) {
@@ -221,7 +208,7 @@ public class GeoHashGridTests extends ElasticsearchIntegrationTest {
                     )
                     .execute().actionGet();
 
-            assertThat(response.getFailedShards(), equalTo(0));
+            assertSearchResponse(response);
 
             GeoHashGrid geoGrid = response.getAggregations().get("geohashgrid");
             //Check we only have one bucket with the best match for that resolution
@@ -257,7 +244,7 @@ public class GeoHashGridTests extends ElasticsearchIntegrationTest {
                     )
                     .execute().actionGet();
 
-            assertThat(response.getFailedShards(), equalTo(0));
+            assertSearchResponse(response);
             GeoHashGrid geoGrid = response.getAggregations().get("geohashgrid");
             assertThat(geoGrid.getBuckets().size(), greaterThanOrEqualTo(1));
         }

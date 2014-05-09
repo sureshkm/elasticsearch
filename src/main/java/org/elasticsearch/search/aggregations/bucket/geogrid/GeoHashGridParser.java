@@ -21,18 +21,21 @@ package org.elasticsearch.search.aggregations.bucket.geogrid;
 import org.elasticsearch.common.geo.GeoHashUtils;
 import org.elasticsearch.common.geo.GeoPoint;
 import org.elasticsearch.common.xcontent.XContentParser;
-import org.elasticsearch.index.fielddata.*;
-import org.elasticsearch.index.mapper.FieldMapper;
+import org.elasticsearch.index.fielddata.BytesValues;
+import org.elasticsearch.index.fielddata.DoubleValues;
+import org.elasticsearch.index.fielddata.GeoPointValues;
+import org.elasticsearch.index.fielddata.LongValues;
 import org.elasticsearch.index.query.GeoBoundingBoxFilterBuilder;
 import org.elasticsearch.search.aggregations.Aggregator;
 import org.elasticsearch.search.aggregations.AggregatorFactory;
+import org.elasticsearch.search.aggregations.InternalAggregation;
+import org.elasticsearch.search.aggregations.NonCollectingAggregator;
 import org.elasticsearch.search.aggregations.bucket.BucketUtils;
 import org.elasticsearch.search.aggregations.support.*;
-import org.elasticsearch.search.aggregations.support.geopoints.GeoPointValuesSource;
-import org.elasticsearch.search.aggregations.support.numeric.NumericValuesSource;
 import org.elasticsearch.search.internal.SearchContext;
 
 import java.io.IOException;
+import java.util.Collections;
 
 /**
  * Aggregates Geo information into cells determined by geohashes of a given precision.
@@ -52,21 +55,19 @@ public class GeoHashGridParser implements Aggregator.Parser {
     @Override
     public AggregatorFactory parse(String aggregationName, XContentParser parser, SearchContext context) throws IOException {
 
-        String field = null;
+        ValuesSourceParser vsParser = ValuesSourceParser.geoPoint(aggregationName, InternalGeoHashGrid.TYPE, context).build();
+
         int precision = DEFAULT_PRECISION;
         int requiredSize = DEFAULT_MAX_NUM_CELLS;
         int shardSize = -1;
-
 
         XContentParser.Token token;
         String currentFieldName = null;
         while ((token = parser.nextToken()) != XContentParser.Token.END_OBJECT) {
             if (token == XContentParser.Token.FIELD_NAME) {
                 currentFieldName = parser.currentName();
-            } else if (token == XContentParser.Token.VALUE_STRING) {
-                if ("field".equals(currentFieldName)) {
-                    field = parser.text();
-                }
+            } else if (vsParser.token(currentFieldName, token, parser)) {
+                continue;
             } else if (token == XContentParser.Token.VALUE_NUMBER) {
                 if ("precision".equals(currentFieldName)) {
                     precision = parser.intValue();
@@ -75,7 +76,6 @@ public class GeoHashGridParser implements Aggregator.Parser {
                 } else if ("shard_size".equals(currentFieldName) || "shardSize".equals(currentFieldName)) {
                     shardSize = parser.intValue();
                 }
-
             }
         }
 
@@ -96,32 +96,19 @@ public class GeoHashGridParser implements Aggregator.Parser {
             shardSize = requiredSize;
         }
 
-        ValuesSourceConfig<GeoPointValuesSource> config = new ValuesSourceConfig<GeoPointValuesSource>(GeoPointValuesSource.class);
-        if (field == null) {
-            return new GeoGridFactory(aggregationName, config, precision, requiredSize, shardSize);
-        }
+        return new GeoGridFactory(aggregationName, vsParser.config(), precision, requiredSize, shardSize);
 
-        FieldMapper<?> mapper = context.smartNameFieldMapper(field);
-        if (mapper == null) {
-            config.unmapped(true);
-            return new GeoGridFactory(aggregationName, config, precision, requiredSize, shardSize);
-        }
-
-        IndexFieldData<?> indexFieldData = context.fieldData().getForField(mapper);
-        config.fieldContext(new FieldContext(field, indexFieldData));
-        return new GeoGridFactory(aggregationName, config, precision, requiredSize, shardSize);
     }
 
 
-    private static class GeoGridFactory extends ValueSourceAggregatorFactory<GeoPointValuesSource> {
+    private static class GeoGridFactory extends ValuesSourceAggregatorFactory<ValuesSource.GeoPoint> {
 
         private int precision;
         private int requiredSize;
         private int shardSize;
 
-        public GeoGridFactory(String name, ValuesSourceConfig<GeoPointValuesSource> valueSourceConfig,
-                              int precision, int requiredSize, int shardSize) {
-            super(name, InternalGeoHashGrid.TYPE.name(), valueSourceConfig);
+        public GeoGridFactory(String name, ValuesSourceConfig<ValuesSource.GeoPoint> config, int precision, int requiredSize, int shardSize) {
+            super(name, InternalGeoHashGrid.TYPE.name(), config);
             this.precision = precision;
             this.requiredSize = requiredSize;
             this.shardSize = shardSize;
@@ -129,30 +116,33 @@ public class GeoHashGridParser implements Aggregator.Parser {
 
         @Override
         protected Aggregator createUnmapped(AggregationContext aggregationContext, Aggregator parent) {
-            return new GeoHashGridAggregator.Unmapped(name, requiredSize, aggregationContext, parent);
+            final InternalAggregation aggregation = new InternalGeoHashGrid(name, requiredSize, Collections.<InternalGeoHashGrid.Bucket>emptyList());
+            return new NonCollectingAggregator(name, aggregationContext, parent) {
+                public InternalAggregation buildEmptyAggregation() {
+                    return aggregation;
+                }
+            };
         }
 
         @Override
-        protected Aggregator create(final GeoPointValuesSource valuesSource, long expectedBucketsCount, AggregationContext aggregationContext, Aggregator parent) {
+        protected Aggregator create(final ValuesSource.GeoPoint valuesSource, long expectedBucketsCount, AggregationContext aggregationContext, Aggregator parent) {
             final CellValues cellIdValues = new CellValues(valuesSource, precision);
-            FieldDataSource.Numeric cellIdSource = new CellIdSource(cellIdValues, valuesSource.metaData());
+            ValuesSource.Numeric cellIdSource = new CellIdSource(cellIdValues, valuesSource.metaData());
             if (cellIdSource.metaData().multiValued()) {
                 // we need to wrap to ensure uniqueness
-                cellIdSource = new FieldDataSource.Numeric.SortedAndUnique(cellIdSource);
+                cellIdSource = new ValuesSource.Numeric.SortedAndUnique(cellIdSource);
             }
-            final NumericValuesSource geohashIdSource = new NumericValuesSource(cellIdSource, null, null);
-            return new GeoHashGridAggregator(name, factories, geohashIdSource, requiredSize,
-                    shardSize, aggregationContext, parent);
+            return new GeoHashGridAggregator(name, factories, cellIdSource, requiredSize, shardSize, aggregationContext, parent);
 
         }
 
         private static class CellValues extends LongValues {
 
-            private GeoPointValuesSource geoPointValues;
+            private ValuesSource.GeoPoint geoPointValues;
             private GeoPointValues geoValues;
             private int precision;
 
-            protected CellValues(GeoPointValuesSource geoPointValues, int precision) {
+            protected CellValues(ValuesSource.GeoPoint geoPointValues, int precision) {
                 super(true);
                 this.geoPointValues = geoPointValues;
                 this.precision = precision;
@@ -160,7 +150,7 @@ public class GeoHashGridParser implements Aggregator.Parser {
 
             @Override
             public int setDocument(int docId) {
-                geoValues = geoPointValues.values();
+                geoValues = geoPointValues.geoPointValues();
                 return geoValues.setDocument(docId);
             }
 
@@ -172,7 +162,7 @@ public class GeoHashGridParser implements Aggregator.Parser {
 
         }
 
-        private static class CellIdSource extends FieldDataSource.Numeric {
+        private static class CellIdSource extends ValuesSource.Numeric {
             private final LongValues values;
             private MetaData metaData;
 

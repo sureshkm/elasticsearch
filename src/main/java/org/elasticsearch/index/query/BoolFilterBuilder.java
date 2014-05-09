@@ -19,15 +19,11 @@
 
 package org.elasticsearch.index.query;
 
-import org.apache.lucene.search.BooleanClause;
 import org.elasticsearch.common.xcontent.XContentBuilder;
-import org.elasticsearch.common.xcontent.ToXContent.Params;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * A filter that matches documents matching boolean combinations of other filters.
@@ -36,11 +32,11 @@ import java.util.Map;
  */
 public class BoolFilterBuilder extends BaseFilterBuilder {
     
-    private ArrayList<FilterBuilder> mustClauses = new ArrayList<FilterBuilder>();
+    private ArrayList<FilterBuilder> mustClauses = new ArrayList<>();
 
-    private ArrayList<FilterBuilder> mustNotClauses = new ArrayList<FilterBuilder>();
+    private ArrayList<FilterBuilder> mustNotClauses = new ArrayList<>();
 
-    private ArrayList<FilterBuilder> shouldClauses = new ArrayList<FilterBuilder>();
+    private ArrayList<FilterBuilder> shouldClauses = new ArrayList<>();
     
     private Boolean cache;
     private String cacheKey;
@@ -102,6 +98,14 @@ public class BoolFilterBuilder extends BaseFilterBuilder {
         	shouldClauses.add(fb);
         }
         return this;
+    }
+
+    /**
+     * Returns <code>true</code> iff this filter builder has at least one should, must or mustNot clause.
+     * Otherwise <code>false</code>.
+     */
+    public boolean hasClauses() {
+        return !(mustClauses.isEmpty() && shouldClauses.isEmpty() && mustNotClauses.isEmpty());
     }
     
     /**

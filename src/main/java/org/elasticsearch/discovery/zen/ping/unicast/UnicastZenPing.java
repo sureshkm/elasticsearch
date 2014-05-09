@@ -78,7 +78,7 @@ public class UnicastZenPing extends AbstractLifecycleComponent<ZenPing> implemen
     // a list of temporal responses a node will return for a request (holds requests from other nodes)
     private final Queue<PingResponse> temporalResponses = ConcurrentCollections.newQueue();
 
-    private final CopyOnWriteArrayList<UnicastHostsProvider> hostsProviders = new CopyOnWriteArrayList<UnicastHostsProvider>();
+    private final CopyOnWriteArrayList<UnicastHostsProvider> hostsProviders = new CopyOnWriteArrayList<>();
 
     public UnicastZenPing(Settings settings, ThreadPool threadPool, TransportService transportService, ClusterName clusterName, Version version, @Nullable Set<UnicastHostsProvider> unicastHostsProviders) {
         super(settings);
@@ -147,7 +147,7 @@ public class UnicastZenPing extends AbstractLifecycleComponent<ZenPing> implemen
     }
 
     public PingResponse[] pingAndWait(TimeValue timeout) {
-        final AtomicReference<PingResponse[]> response = new AtomicReference<PingResponse[]>();
+        final AtomicReference<PingResponse[]> response = new AtomicReference<>();
         final CountDownLatch latch = new CountDownLatch(1);
         ping(new PingListener() {
             @Override
@@ -240,7 +240,14 @@ public class UnicastZenPing extends AbstractLifecycleComponent<ZenPing> implemen
         DiscoveryNodes discoNodes = nodesProvider.nodes();
         pingRequest.pingResponse = new PingResponse(discoNodes.localNode(), discoNodes.masterNode(), clusterName);
 
-        List<DiscoveryNode> nodesToPing = newArrayList(nodes);
+        HashSet<DiscoveryNode> nodesToPing = new HashSet<>(Arrays.asList(nodes));
+        for (PingResponse temporalResponse : temporalResponses) {
+            // Only send pings to nodes that have the same cluster name.
+            if (clusterName.equals(temporalResponse.clusterName())) {
+                nodesToPing.add(temporalResponse.target());
+            }
+        }
+
         for (UnicastHostsProvider provider : hostsProviders) {
             nodesToPing.addAll(provider.buildDynamicNodes());
         }
@@ -268,10 +275,11 @@ public class UnicastZenPing extends AbstractLifecycleComponent<ZenPing> implemen
                 sendPingsHandler.executor().execute(new Runnable() {
                     @Override
                     public void run() {
+                        if (sendPingsHandler.isClosed()) {
+                            return;
+                        }
+                        boolean success = false;
                         try {
-                            if (sendPingsHandler.isClosed()) {
-                                return;
-                            }
                             // connect to the node, see if we manage to do it, if not, bail
                             if (!nodeFoundByAddress) {
                                 logger.trace("[{}] connecting (light) to {}", sendPingsHandler.id(), nodeToSend);
@@ -289,10 +297,16 @@ public class UnicastZenPing extends AbstractLifecycleComponent<ZenPing> implemen
                                 latch.countDown();
                                 logger.trace("[{}] connect to {} was too long outside of ping window, bailing", sendPingsHandler.id(), node);
                             }
+                            success = true;
                         } catch (ConnectTransportException e) {
-                            // can't connect to the node
+                            // can't connect to the node - this is a more common path!
                             logger.trace("[{}] failed to connect to {}", e, sendPingsHandler.id(), nodeToSend);
-                            latch.countDown();
+                        } catch (Throwable e) {
+                            logger.warn("[{}] failed send ping to {}", e, sendPingsHandler.id(), nodeToSend);
+                        } finally {
+                            if (!success) {
+                                latch.countDown();
+                            }
                         }
                     }
                 });
@@ -342,7 +356,17 @@ public class UnicastZenPing extends AbstractLifecycleComponent<ZenPing> implemen
                         if (responses == null) {
                             logger.warn("received ping response {} with no matching id [{}]", pingResponse, response.id);
                         } else {
-                            responses.put(pingResponse.target(), pingResponse);
+                            PingResponse existingResponse = responses.get(pingResponse.target());
+                            if (existingResponse == null) {
+                                responses.put(pingResponse.target(), pingResponse);
+                            } else {
+                                // try and merge the best ping response for it, i.e. if the new one
+                                // doesn't have the master node set, and the existing one does, then
+                                // the existing one is better, so we keep it
+                                if (pingResponse.master() != null) {
+                                    responses.put(pingResponse.target(), pingResponse);
+                                }
+                            }
                         }
                     }
                 } finally {

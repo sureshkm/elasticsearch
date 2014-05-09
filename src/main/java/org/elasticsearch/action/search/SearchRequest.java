@@ -21,6 +21,7 @@ package org.elasticsearch.action.search;
 
 import org.elasticsearch.ElasticsearchGenerationException;
 import org.elasticsearch.ElasticsearchIllegalArgumentException;
+import org.elasticsearch.Version;
 import org.elasticsearch.action.ActionRequest;
 import org.elasticsearch.action.ActionRequestValidationException;
 import org.elasticsearch.action.support.IndicesOptions;
@@ -34,11 +35,11 @@ import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
-import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.search.Scroll;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Map;
 
 import static org.elasticsearch.search.Scroll.readScroll;
@@ -58,8 +59,6 @@ import static org.elasticsearch.search.Scroll.readScroll;
  */
 public class SearchRequest extends ActionRequest<SearchRequest> {
 
-    private static final XContentType contentType = Requests.CONTENT_TYPE;
-
     private SearchType searchType = SearchType.DEFAULT;
 
     private String[] indices;
@@ -68,6 +67,11 @@ public class SearchRequest extends ActionRequest<SearchRequest> {
     private String routing;
     @Nullable
     private String preference;
+
+    private BytesReference templateSource;
+    private boolean templateSourceUnsafe;
+    private String templateName;
+    private Map<String, String> templateParams = Collections.emptyMap();
 
     private BytesReference source;
     private boolean sourceUnsafe;
@@ -79,9 +83,7 @@ public class SearchRequest extends ActionRequest<SearchRequest> {
 
     private String[] types = Strings.EMPTY_ARRAY;
 
-    private SearchOperationThreading operationThreading = SearchOperationThreading.THREAD_PER_SHARD;
-
-    private IndicesOptions indicesOptions = IndicesOptions.strict();
+    private IndicesOptions indicesOptions = IndicesOptions.strictExpandOpen();
 
     public SearchRequest() {
     }
@@ -123,12 +125,10 @@ public class SearchRequest extends ActionRequest<SearchRequest> {
             extraSource = extraSource.copyBytesArray();
             extraSourceUnsafe = false;
         }
-    }
-
-    /**
-     * Internal.
-     */
-    public void beforeLocalFork() {
+        if (templateSource != null && templateSourceUnsafe) {
+            templateSource = templateSource.copyBytesArray();
+            templateSourceUnsafe = false;
+        }
     }
 
     /**
@@ -146,29 +146,6 @@ public class SearchRequest extends ActionRequest<SearchRequest> {
         }
         this.indices = indices;
         return this;
-    }
-
-    /**
-     * Controls the the search operation threading model.
-     */
-    public SearchOperationThreading operationThreading() {
-        return this.operationThreading;
-    }
-
-    /**
-     * Controls the the search operation threading model.
-     */
-    public SearchRequest operationThreading(SearchOperationThreading operationThreading) {
-        this.operationThreading = operationThreading;
-        return this;
-    }
-
-    /**
-     * Sets the string representation of the operation threading model. Can be one of
-     * "no_threads", "single_thread" and "thread_per_shard".
-     */
-    public SearchRequest operationThreading(String operationThreading) {
-        return operationThreading(SearchOperationThreading.fromString(operationThreading, this.operationThreading));
     }
 
     public IndicesOptions indicesOptions() {
@@ -255,7 +232,7 @@ public class SearchRequest extends ActionRequest<SearchRequest> {
      * The source of the search request.
      */
     public SearchRequest source(SearchSourceBuilder sourceBuilder) {
-        this.source = sourceBuilder.buildAsBytes(contentType);
+        this.source = sourceBuilder.buildAsBytes(Requests.CONTENT_TYPE);
         this.sourceUnsafe = false;
         return this;
     }
@@ -275,7 +252,7 @@ public class SearchRequest extends ActionRequest<SearchRequest> {
      */
     public SearchRequest source(Map source) {
         try {
-            XContentBuilder builder = XContentFactory.contentBuilder(contentType);
+            XContentBuilder builder = XContentFactory.contentBuilder(Requests.CONTENT_TYPE);
             builder.map(source);
             return source(builder);
         } catch (IOException e) {
@@ -328,6 +305,13 @@ public class SearchRequest extends ActionRequest<SearchRequest> {
     }
 
     /**
+     * The search source template to execute.
+     */
+    public BytesReference templateSource() {
+        return templateSource;
+    }
+
+    /**
      * Allows to provide additional source that will be used as well.
      */
     public SearchRequest extraSource(SearchSourceBuilder sourceBuilder) {
@@ -335,14 +319,14 @@ public class SearchRequest extends ActionRequest<SearchRequest> {
             extraSource = null;
             return this;
         }
-        this.extraSource = sourceBuilder.buildAsBytes(contentType);
+        this.extraSource = sourceBuilder.buildAsBytes(Requests.CONTENT_TYPE);
         this.extraSourceUnsafe = false;
         return this;
     }
 
     public SearchRequest extraSource(Map extraSource) {
         try {
-            XContentBuilder builder = XContentFactory.contentBuilder(contentType);
+            XContentBuilder builder = XContentFactory.contentBuilder(Requests.CONTENT_TYPE);
             builder.map(extraSource);
             return extraSource(builder);
         } catch (IOException e) {
@@ -393,6 +377,52 @@ public class SearchRequest extends ActionRequest<SearchRequest> {
         this.extraSource = source;
         this.extraSourceUnsafe = unsafe;
         return this;
+    }
+
+    /**
+     * Allows to provide template as source.
+     */
+    public SearchRequest templateSource(BytesReference template, boolean unsafe) {
+        this.templateSource = template;
+        this.templateSourceUnsafe = unsafe;
+        return this;
+    }
+
+    /**
+     * The template of the search request.
+     */
+    public SearchRequest templateSource(String template) {
+        this.templateSource = new BytesArray(template);
+        this.templateSourceUnsafe = false;
+        return this;
+    }
+
+    /**
+     * The name of the stored template
+     */
+    public void templateName(String name) {
+        this.templateName = name;
+    }
+
+    /**
+     * Template parameters used for rendering
+     */
+    public void templateParams(Map<String, String> params) {
+        this.templateParams = params;
+    }
+
+    /**
+     * The name of the stored template
+     */
+    public String templateName() {
+        return templateName;
+    }
+
+    /**
+     * Template parameters used for rendering
+     */
+    public Map<String, String> templateParams() {
+        return templateParams;
     }
 
     /**
@@ -448,7 +478,9 @@ public class SearchRequest extends ActionRequest<SearchRequest> {
     @Override
     public void readFrom(StreamInput in) throws IOException {
         super.readFrom(in);
-        operationThreading = SearchOperationThreading.fromId(in.readByte());
+        if (in.getVersion().before(Version.V_1_2_0)) {
+            in.readByte(); // backward comp. for operation threading
+        }
         searchType = SearchType.fromId(in.readByte());
 
         indices = new String[in.readVInt()];
@@ -471,12 +503,23 @@ public class SearchRequest extends ActionRequest<SearchRequest> {
 
         types = in.readStringArray();
         indicesOptions = IndicesOptions.readIndicesOptions(in);
+
+        if (in.getVersion().onOrAfter(Version.V_1_1_0)) {
+            templateSourceUnsafe = false;
+            templateSource = in.readBytesReference();
+            templateName =  in.readOptionalString();
+            if (in.readBoolean()) {
+                templateParams = (Map<String, String>) in.readGenericValue();
+            }
+        }
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         super.writeTo(out);
-        out.writeByte(operationThreading.id());
+        if (out.getVersion().before(Version.V_1_2_0)) {
+            out.writeByte((byte) 2); // operation threading
+        }
         out.writeByte(searchType.id());
 
         out.writeVInt(indices.length);
@@ -497,5 +540,16 @@ public class SearchRequest extends ActionRequest<SearchRequest> {
         out.writeBytesReference(extraSource);
         out.writeStringArray(types);
         indicesOptions.writeIndicesOptions(out);
+
+        if (out.getVersion().onOrAfter(Version.V_1_1_0)) {
+            out.writeBytesReference(templateSource);
+            out.writeOptionalString(templateName);
+
+            boolean existTemplateParams = templateParams != null;
+            out.writeBoolean(existTemplateParams);
+            if (existTemplateParams) {
+                out.writeGenericValue(templateParams);
+            }
+        }
     }
 }

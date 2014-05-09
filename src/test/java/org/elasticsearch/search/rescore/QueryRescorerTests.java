@@ -41,11 +41,10 @@ import org.elasticsearch.search.rescore.RescoreBuilder.QueryRescorer;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
 import org.junit.Test;
 
+import static org.elasticsearch.cluster.metadata.IndexMetaData.SETTING_NUMBER_OF_SHARDS;
 import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.*;
-import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.greaterThanOrEqualTo;
-import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.*;
 
 /**
  *
@@ -54,17 +53,15 @@ public class QueryRescorerTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void testEnforceWindowSize() {
-        final int numShards = between(1, 5);
-        assertAcked(client().admin()
-                .indices()
-                .prepareCreate("test")
-                .setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards", numShards)));
+        createIndex("test");
         // this
-        int iters = atLeast(10);
+        int iters = scaledRandomIntBetween(10, 20);
         for (int i = 0; i < iters; i ++) {
             client().prepareIndex("test", "type", Integer.toString(i)).setSource("f", Integer.toString(i)).execute().actionGet();
         }
         refresh();
+
+        int numShards = getNumShards("test").numPrimaries;
         for (int j = 0 ; j < iters; j++) {
             SearchResponse searchResponse = client().prepareSearch()
                     .setQuery(QueryBuilders.matchAllQuery())
@@ -88,14 +85,12 @@ public class QueryRescorerTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void testRescorePhrase() throws Exception {
-        client().admin()
-                .indices()
-                .prepareCreate("test")
+        assertAcked(prepareCreate("test")
                 .addMapping(
                         "type1",
                         jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("field1")
                                 .field("analyzer", "whitespace").field("type", "string").endObject().endObject().endObject().endObject())
-                .setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards", 2)).execute().actionGet();
+                .setSettings(ImmutableSettings.settingsBuilder().put(indexSettings()).put("index.number_of_shards", 2)));
 
         client().prepareIndex("test", "type1", "1").setSource("field1", "the quick brown fox").execute().actionGet();
         client().prepareIndex("test", "type1", "2").setSource("field1", "the quick lazy huge brown fox jumps over the tree").execute()
@@ -147,8 +142,7 @@ public class QueryRescorerTests extends ElasticsearchIntegrationTest {
                 .startObject("field1").field("type", "string").field("index_analyzer", "whitespace").field("search_analyzer", "synonym")
                 .endObject().endObject().endObject().endObject();
 
-        client().admin().indices().prepareCreate("test").addMapping("type1", mapping).setSettings(builder.put("index.number_of_shards", 1))
-                .execute().actionGet();
+        assertAcked(client().admin().indices().prepareCreate("test").addMapping("type1", mapping).setSettings(builder.put("index.number_of_shards", 1)));
 
         client().prepareIndex("test", "type1", "1").setSource("field1", "massachusetts avenue boston massachusetts").execute().actionGet();
         client().prepareIndex("test", "type1", "2").setSource("field1", "lexington avenue boston massachusetts").execute().actionGet();
@@ -198,7 +192,7 @@ public class QueryRescorerTests extends ElasticsearchIntegrationTest {
         assertThirdHit(searchResponse, hasId("3"));
     }
 
-    private static final void assertEquivalent(String query, SearchResponse plain, SearchResponse rescored) {
+    private static void assertEquivalent(String query, SearchResponse plain, SearchResponse rescored) {
         assertNoFailures(plain);
         assertNoFailures(rescored);
         SearchHits leftHits = plain.getHits();
@@ -218,7 +212,7 @@ public class QueryRescorerTests extends ElasticsearchIntegrationTest {
         }
     }
 
-    private static final void assertEquivalentOrSubstringMatch(String query, SearchResponse plain, SearchResponse rescored) {
+    private static void assertEquivalentOrSubstringMatch(String query, SearchResponse plain, SearchResponse rescored) {
         SearchHits leftHits = plain.getHits();
         SearchHits rightHits = rescored.getHits();
         assertThat(leftHits.getTotalHits(), equalTo(rightHits.getTotalHits()));
@@ -240,9 +234,9 @@ public class QueryRescorerTests extends ElasticsearchIntegrationTest {
     @Test
     // forces QUERY_THEN_FETCH because of https://github.com/elasticsearch/elasticsearch/issues/4829
     public void testEquivalence() throws Exception {
-        int numDocs = indexRandomNumbers("whitespace", between(1,5));
+        int numDocs = indexRandomNumbers("whitespace");
 
-        final int iters = atLeast(50);
+        final int iters = scaledRandomIntBetween(50, 100);
         for (int i = 0; i < iters; i++) {
             int resultSize = between(5, 30);
             int rescoreWindow = between(1, 3) * resultSize;
@@ -310,12 +304,12 @@ public class QueryRescorerTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void testExplain() throws Exception {
-        prepareCreate("test")
+        assertAcked(prepareCreate("test")
                 .addMapping(
                         "type1",
                         jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("field1")
                                 .field("analyzer", "whitespace").field("type", "string").endObject().endObject().endObject().endObject())
-                .setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards", 2)).execute().actionGet();
+        );
         ensureGreen();
         client().prepareIndex("test", "type1", "1").setSource("field1", "the quick brown fox").execute().actionGet();
         client().prepareIndex("test", "type1", "2").setSource("field1", "the quick lazy huge brown fox jumps over the tree").execute()
@@ -410,7 +404,7 @@ public class QueryRescorerTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void testScoring() throws Exception {
-        int numDocs = indexRandomNumbers("keyword", between(1,5));
+        int numDocs = indexRandomNumbers("keyword");
 
         String[] scoreModes = new String[]{ "max", "min", "avg", "total", "multiply", "" };
         float primaryWeight = 1.1f;
@@ -531,16 +525,24 @@ public class QueryRescorerTests extends ElasticsearchIntegrationTest {
         assertSecondHit(response, hasScore(1001.0f)); // Not sure which one it is but it is ninety something
     }
 
+    private int indexRandomNumbers(String analyzer) throws Exception {
+        return indexRandomNumbers(analyzer, -1);
+    }
+
     private int indexRandomNumbers(String analyzer, int shards) throws Exception {
-        client().admin()
-                .indices()
-                .prepareCreate("test")
+        Builder builder = ImmutableSettings.settingsBuilder().put(indexSettings());
+
+        if (shards > 0) {
+            builder.put(SETTING_NUMBER_OF_SHARDS, shards);
+        }
+
+        assertAcked(prepareCreate("test")
                 .addMapping(
                         "type1",
                         jsonBuilder().startObject().startObject("type1").startObject("properties").startObject("field1")
                                 .field("analyzer", analyzer).field("type", "string").endObject().endObject().endObject().endObject())
-                .setSettings(ImmutableSettings.settingsBuilder().put("index.number_of_shards", shards).put("index.number_of_replicas", between(0,1))).get();
-        int numDocs = atLeast(100);
+                .setSettings(builder));
+        int numDocs = randomIntBetween(100, 150);
         IndexRequestBuilder[] docs = new IndexRequestBuilder[numDocs];
         for (int i = 0; i < numDocs; i++) {
             docs[i] = client().prepareIndex("test", "type1", String.valueOf(i)).setSource("field1", English.intToEnglish(i));

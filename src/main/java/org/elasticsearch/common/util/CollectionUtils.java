@@ -22,8 +22,11 @@ package org.elasticsearch.common.util;
 import com.carrotsearch.hppc.DoubleArrayList;
 import com.carrotsearch.hppc.FloatArrayList;
 import com.carrotsearch.hppc.LongArrayList;
-import com.google.common.primitives.Longs;
-import org.apache.lucene.util.IntroSorter;
+import com.carrotsearch.hppc.ObjectArrayList;
+import org.apache.lucene.util.*;
+import org.elasticsearch.common.Preconditions;
+
+import java.util.*;
 
 /** Collections-related utility methods. */
 public enum CollectionUtils {
@@ -47,7 +50,7 @@ public enum CollectionUtils {
 
             @Override
             protected int compare(int i, int j) {
-                return Longs.compare(array[i], array[j]);
+                return Long.compare(array[i], array[j]);
             }
 
             @Override
@@ -57,7 +60,7 @@ public enum CollectionUtils {
 
             @Override
             protected int comparePivot(int j) {
-                return Longs.compare(pivot, array[j]);
+                return Long.compare(pivot, array[j]);
             }
 
         }.sort(0, len);
@@ -187,16 +190,172 @@ public enum CollectionUtils {
         }
         return uniqueCount;
     }
-    
+
     /**
      * Checks if the given array contains any elements.
-     * 
+     *
      * @param array The array to check
-     * 
+     *
      * @return false if the array contains an element, true if not or the array is null.
      */
     public static boolean isEmpty(Object[] array) {
         return array == null || array.length == 0;
     }
+
+    /**
+     * Return a rotated view of the given list with the given distance.
+     */
+    public static <T> List<T> rotate(final List<T> list, int distance) {
+        if (list.isEmpty()) {
+            return list;
+        }
+
+        int d = distance % list.size();
+        if (d < 0) {
+            d += list.size();
+        }
+
+        if (d == 0) {
+            return list;
+        }
+
+        return new RotatedList<>(list, d);
+    }
+
+    public static void sortAndDedup(final ObjectArrayList<byte[]> array) {
+        int len = array.size();
+        if (len > 1) {
+            sort(array);
+            int uniqueCount = 1;
+            for (int i = 1; i < len; ++i) {
+                if (!Arrays.equals(array.get(i), array.get(i - 1))) {
+                    array.set(uniqueCount++, array.get(i));
+                }
+            }
+            array.elementsCount = uniqueCount;
+        }
+    }
+
+    public static void sort(final ObjectArrayList<byte[]> array) {
+        new IntroSorter() {
+
+            byte[] pivot;
+
+            @Override
+            protected void swap(int i, int j) {
+                final byte[] tmp = array.get(i);
+                array.set(i, array.get(j));
+                array.set(j, tmp);
+            }
+
+            @Override
+            protected int compare(int i, int j) {
+                return compare(array.get(i), array.get(j));
+            }
+
+            @Override
+            protected void setPivot(int i) {
+                pivot = array.get(i);
+            }
+
+            @Override
+            protected int comparePivot(int j) {
+                return compare(pivot, array.get(j));
+            }
+
+            private int compare(byte[] left, byte[] right) {
+                for (int i = 0, j = 0; i < left.length && j < right.length; i++, j++) {
+                    int a = left[i] & 0xFF;
+                    int b = right[j] & 0xFF;
+                    if (a != b) {
+                        return a - b;
+                    }
+                }
+                return left.length - right.length;
+            }
+
+        }.sort(0, array.size());
+    }
+
+    private static class RotatedList<T> extends AbstractList<T> implements RandomAccess {
+
+        private final List<T> in;
+        private final int distance;
+
+        public RotatedList(List<T> list, int distance) {
+            Preconditions.checkArgument(distance >= 0 && distance < list.size());
+            Preconditions.checkArgument(list instanceof RandomAccess);
+            this.in = list;
+            this.distance = distance;
+        }
+
+        @Override
+        public T get(int index) {
+            int idx = distance + index;
+            if (idx < 0 || idx >= in.size()) {
+                idx -= in.size();
+            }
+            return in.get(idx);
+        }
+
+        @Override
+        public int size() {
+            return in.size();
+        }
+
+    };
+    public static void sort(final BytesRefArray bytes, final int[] indices) {
+        sort(new BytesRef(), new BytesRef(), bytes, indices);
+    }
+
+    private static void sort(final BytesRef scratch, final BytesRef scratch1, final BytesRefArray bytes, final int[] indices) {
+
+        final int numValues = bytes.size();
+        assert indices.length >= numValues;
+        if (numValues > 1) {
+            new InPlaceMergeSorter() {
+                final Comparator<BytesRef> comparator = BytesRef.getUTF8SortedAsUnicodeComparator();
+                @Override
+                protected int compare(int i, int j) {
+                    return comparator.compare(bytes.get(scratch, indices[i]), bytes.get(scratch1, indices[j]));
+                }
+
+                @Override
+                protected void swap(int i, int j) {
+                    int value_i = indices[i];
+                    indices[i] = indices[j];
+                    indices[j] = value_i;
+                }
+            }.sort(0, numValues);
+        }
+
+    }
+
+    public static int sortAndDedup(final BytesRefArray bytes, final int[] indices) {
+        final BytesRef scratch = new BytesRef();
+        final BytesRef scratch1 = new BytesRef();
+        final int numValues = bytes.size();
+        assert indices.length >= numValues;
+        if (numValues <= 1) {
+            return numValues;
+        }
+        sort(scratch, scratch1, bytes, indices);
+        int uniqueCount = 1;
+        BytesRef previous = scratch;
+        BytesRef current = scratch1;
+        bytes.get(previous, indices[0]);
+        for (int i = 1; i < numValues; ++i) {
+            bytes.get(current, indices[i]);
+            if (!previous.equals(current)) {
+                indices[uniqueCount++] = indices[i];
+            }
+            BytesRef tmp = previous;
+            previous = current;
+            current = tmp;
+        }
+        return uniqueCount;
+
+    }
+
 
 }

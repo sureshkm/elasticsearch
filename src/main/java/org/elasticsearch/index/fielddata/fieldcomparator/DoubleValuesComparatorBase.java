@@ -22,6 +22,7 @@ import org.apache.lucene.index.AtomicReaderContext;
 import org.apache.lucene.search.FieldComparator;
 import org.elasticsearch.index.fielddata.DoubleValues;
 import org.elasticsearch.index.fielddata.IndexNumericFieldData;
+import org.elasticsearch.search.MultiValueMode;
 
 import java.io.IOException;
 
@@ -31,9 +32,9 @@ abstract class DoubleValuesComparatorBase<T extends Number> extends NumberCompar
     protected final double missingValue;
     protected double bottom;
     protected DoubleValues readerValues;
-    protected final SortMode sortMode;
+    protected final MultiValueMode sortMode;
 
-    public DoubleValuesComparatorBase(IndexNumericFieldData<?> indexFieldData, double missingValue, SortMode sortMode) {
+    public DoubleValuesComparatorBase(IndexNumericFieldData<?> indexFieldData, double missingValue, MultiValueMode sortMode) {
         this.indexFieldData = indexFieldData;
         this.missingValue = missingValue;
         this.sortMode = sortMode;
@@ -46,10 +47,8 @@ abstract class DoubleValuesComparatorBase<T extends Number> extends NumberCompar
     }
 
     @Override
-    public final int compareDocToValue(int doc, T valueObj) throws IOException {
-        final double value = valueObj.doubleValue();
-        final double docValue = sortMode.getRelevantValue(readerValues, doc, missingValue);
-        return compare(docValue, value);
+    public int compareTop(int doc) throws IOException {
+        return compare(top.doubleValue(), sortMode.getRelevantValue(readerValues, doc, missingValue));
     }
 
     @Override
@@ -61,6 +60,11 @@ abstract class DoubleValuesComparatorBase<T extends Number> extends NumberCompar
     @Override
     public int compareBottomMissing() {
         return compare(bottom, missingValue);
+    }
+
+    @Override
+    public int compareTopMissing() {
+        return compare(top.doubleValue(), missingValue);
     }
 
     static final int compare(double left, double right) {

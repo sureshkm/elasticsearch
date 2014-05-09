@@ -29,8 +29,8 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.rest.*;
+import org.elasticsearch.rest.action.support.AcknowledgedRestListener;
 
-import java.io.IOException;
 import java.util.Map;
 
 import static org.elasticsearch.cluster.metadata.AliasAction.newAddAliasAction;
@@ -48,12 +48,11 @@ public class RestIndicesAliasesAction extends BaseRestHandler {
     }
 
     @Override
-    public void handleRequest(final RestRequest request, final RestChannel channel) {
+    public void handleRequest(final RestRequest request, final RestChannel channel) throws Exception {
         IndicesAliasesRequest indicesAliasesRequest = new IndicesAliasesRequest();
         indicesAliasesRequest.listenerThreaded(false);
         indicesAliasesRequest.masterNodeTimeout(request.paramAsTime("master_timeout", indicesAliasesRequest.masterNodeTimeout()));
-        XContentParser parser = null;
-        try {
+        try (XContentParser parser = XContentFactory.xContent(request.content()).createParser(request.content())) {
             // {
             //     actions : [
             //         { add : { index : "test1", alias : "alias1", filter : {"user" : "kimchy"} } }
@@ -61,7 +60,6 @@ public class RestIndicesAliasesAction extends BaseRestHandler {
             //     ]
             // }
             indicesAliasesRequest.timeout(request.paramAsTime("timeout", indicesAliasesRequest.timeout()));
-            parser = XContentFactory.xContent(request.content()).createParser(request.content());
             XContentParser.Token token = parser.nextToken();
             if (token == null) {
                 throw new ElasticsearchIllegalArgumentException("No action is specified");
@@ -92,7 +90,7 @@ public class RestIndicesAliasesAction extends BaseRestHandler {
                             while ((token = parser.nextToken()) != XContentParser.Token.END_OBJECT) {
                                 if (token == XContentParser.Token.FIELD_NAME) {
                                     currentFieldName = parser.currentName();
-                                } else if (token == XContentParser.Token.VALUE_STRING) {
+                                } else if (token.isValue()) {
                                     if ("index".equals(currentFieldName)) {
                                         index = parser.text();
                                     } else if ("alias".equals(currentFieldName)) {
@@ -133,16 +131,7 @@ public class RestIndicesAliasesAction extends BaseRestHandler {
                     }
                 }
             }
-        } catch (Exception e) {
-            try {
-                channel.sendResponse(new XContentThrowableRestResponse(request, e));
-            } catch (IOException e1) {
-                logger.warn("Failed to send response", e1);
-            }
-            return;
-        } finally {
-            parser.close();
         }
-        client.admin().indices().aliases(indicesAliasesRequest, new AcknowledgedRestResponseActionListener<IndicesAliasesResponse>(request, channel, logger));
+        client.admin().indices().aliases(indicesAliasesRequest, new AcknowledgedRestListener<IndicesAliasesResponse>(channel));
     }
 }

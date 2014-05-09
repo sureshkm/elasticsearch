@@ -93,7 +93,7 @@ public class DefaultPostingsFormatTests extends ElasticsearchTestCase {
         for (int i = 0; i < 100; i++) {
             writer.addDocument(Arrays.asList(new TextField("foo", "foo bar foo bar", Store.YES), new TextField("some_other_field", "1234", Store.YES)));
         }
-        writer.forceMerge(1);
+        writer.forceMerge(1, true);
         writer.commit();
         
         DirectoryReader reader = DirectoryReader.open(writer, false);
@@ -107,7 +107,7 @@ public class DefaultPostingsFormatTests extends ElasticsearchTestCase {
         assertThat(terms, not(instanceOf(BloomFilterPostingsFormat.BloomFilteredTerms.class)));
         assertThat(some_other_field, not(instanceOf(BloomFilterPostingsFormat.BloomFilteredTerms.class)));
         TermsEnum iterator = terms.iterator(null);
-        Set<String> expected = new HashSet<String>();
+        Set<String> expected = new HashSet<>();
         expected.add("foo");
         expected.add("bar");
         while(iterator.next() != null) {

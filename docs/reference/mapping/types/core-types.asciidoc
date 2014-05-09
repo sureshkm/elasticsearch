@@ -86,7 +86,7 @@ The following table lists all the attributes that can be used with the
 |`index_name` |The name of the field that will be stored in the index.
 Defaults to the property/field name.
 
-|`store` |Set to `true` to store actual field in the index, `false` to not
+|`store` |Set to `true` to actually store the field in the index, `false` to not
 store it. Defaults to `false` (note, the JSON document itself is stored,
 and it can be retrieved from it).
 
@@ -110,10 +110,11 @@ Automatically set to `true` when the fielddata format is `doc_values`.
 `null_value` as the field value. Defaults to not adding the field at
 all.
 
-|`norms.enabled` |Boolean value if norms should be enabled or not. Defaults
-to `true` for `analyzed` fields, and to `false` for `not_analyzed` fields.
+|`norms: {enabled: <value>}` |Boolean value if norms should be enabled or
+not. Defaults to `true` for `analyzed` fields, and to `false` for
+`not_analyzed` fields. See the <<norms,section about norms>>.
 
-|`norms.loading` |Describes how norms should be loaded, possible values are
+|`norms: {loading: <value>}` |Describes how norms should be loaded, possible values are
 `eager` and `lazy` (default). It is possible to change the default value to
 eager for all fields by configuring the index setting `index.norms.loading`
 to `eager`.
@@ -167,6 +168,28 @@ the real string content that should eventually be indexed. The `_boost`
 (or `boost`) key specifies the per field document boost (here 2.0).
 
 [float]
+[[norms]]
+===== Norms
+
+Norms store various normalization factors that are later used (at query time)
+in order to compute the score of a document relatively to a query.
+
+Although useful for scoring, norms also require quite a lot of memory
+(typically in the order of one byte per document per field in your index,
+even for documents that don't have this specific field). As a consequence, if
+you don't need scoring on a specific field, it is highly recommended to disable
+norms on it. In  particular, this is the case for fields that are used solely
+for filtering or aggregations.
+
+coming[1.2.0]
+In case you would like to disable norms after the fact, it is possible to do so
+by using the <<indices-put-mapping,PUT mapping API>>. Please however note that
+norms won't be removed instantly, but as your index will receive new insertions
+or updates, and segments get merged. Any score computation on a field that got
+norms removed might return inconsistent results since some documents won't have
+norms anymore while other documents might still have norms.
+
+[float]
 [[number]]
 ==== Number
 
@@ -208,15 +231,16 @@ store it. Defaults to `false` (note, the JSON document itself is stored,
 and it can be retrieved from it).
 
 |`index` |Set to `no` if the value should not be indexed. Setting to
-`no` disables `include_in_all`. If set to `no` the field can be stored
-in `_source`, have `include_in_all` enabled, or `store` should be set to
+`no` disables `include_in_all`. If set to `no` the field should be either stored
+in `_source`, have `include_in_all` enabled, or `store` be set to
 `true` for this to be useful.
 
 |`doc_values` |Set to `true` to store field values in a column-stride fashion.
 Automatically set to `true` when the fielddata format is `doc_values`.
 
-|`precision_step` |The precision step (number of terms generated for
-each number value). Defaults to `4`.
+|`precision_step` |The precision step (influences the number of terms
+generated for each number value). Defaults to `16` for `long`, `double`,
+`8` for `short`, `integer`, `float`, and `2147483647` for `byte`.
 
 |`boost` |The boost value. Defaults to `1.0`.
 
@@ -317,15 +341,15 @@ store it. Defaults to `false` (note, the JSON document itself is stored,
 and it can be retrieved from it).
 
 |`index` |Set to `no` if the value should not be indexed. Setting to
-`no` disables `include_in_all`. If set to `no` the field can be stored
-in `_source`, have `include_in_all` enabled, or `store` should be set to
+`no` disables `include_in_all`. If set to `no` the field should be either stored
+in `_source`, have `include_in_all` enabled, or `store` be set to
 `true` for this to be useful.
 
 |`doc_values` |Set to `true` to store field values in a column-stride fashion.
 Automatically set to `true` when the fielddata format is `doc_values`.
 
-|`precision_step` |The precision step (number of terms generated for
-each number value). Defaults to `4`.
+|`precision_step` |The precision step (influences the number of terms
+generated for each number value). Defaults to `16`.
 
 |`boost` |The boost value. Defaults to `1.0`.
 
@@ -362,8 +386,9 @@ and `false` respectively.
 }
 --------------------------------------------------
 
-The boolean type also supports passing the value as a number (in this
-case `0` is `false`, all other values are `true`).
+The boolean type also supports passing the value as a number or a string
+(in this case `0`, an empty string, `false`, `off` and `no` are
+`false`, all other values are `true`).
 
 The following table lists all the attributes that can be used with the
 boolean type:
@@ -379,8 +404,8 @@ store it. Defaults to `false` (note, the JSON document itself is stored,
 and it can be retrieved from it).
 
 |`index` |Set to `no` if the value should not be indexed. Setting to
-`no` disables `include_in_all`. If set to `no` the field can be stored
-in `_source`, have `include_in_all` enabled, or `store` should be set to
+`no` disables `include_in_all`. If set to `no` the field should be either stored
+in `_source`, have `include_in_all` enabled, or `store` be set to
 `true` for this to be useful.
 
 |`boost` |The boost value. Defaults to `1.0`.
@@ -388,10 +413,6 @@ in `_source`, have `include_in_all` enabled, or `store` should be set to
 |`null_value` |When there is a (JSON) null value for the field, use the
 `null_value` as the field value. Defaults to not adding the field at
 all.
-
-|`include_in_all` |Should the field be included in the `_all` field (if
-enabled). If `index` is set to `no` this defaults to `false`, otherwise,
-defaults to `true` or to the parent `object` type setting.
 |=======================================================================
 
 [float]
@@ -399,7 +420,7 @@ defaults to `true` or to the parent `object` type setting.
 ==== Binary
 
 The binary type is a base64 representation of binary data that can be
-stored in the index. The field is stored by default and not indexed at
+stored in the index. The field is not stored by default and not indexed at
 all.
 
 [source,js]
@@ -418,12 +439,38 @@ all.
 The following table lists all the attributes that can be used with the
 binary type:
 
-[cols="<,<",options="header",]
-|=======================================================================
-|Attribute |Description
-|`index_name` |The name of the field that will be stored in the index.
-Defaults to the property/field name.
-|=======================================================================
+[horizontal]
+
+`index_name`::
+
+    The name of the field that will be stored in the index. Defaults to the
+    property/field name.
+
+`store`::
+
+    Set to `true` to store actual field in the index, `false` to not store it.
+    Defaults to `false` (note, the JSON document itself is already stored, so
+    the binary field can be retrieved from there).
+
+`doc_values`::
+
+    Set to `true` to store field values in a column-stride fashion.
+
+`compress`::
+
+    Set to `true` to compress the stored binary value.
+
+`compress_threshold`::
+
+    Compression will only be applied to stored binary fields that are greater
+    than this size. Defaults to `-1`
+
+NOTE: Enabling compression on stored binary fields only makes sense on large
+and highly-compressible values. Otherwise per-field compression is usually not
+worth doing as the space savings do not compensate for the overhead of the
+compression format. Normally, you should not configure any compression and
+just rely on the block compression of stored fields (which is enabled by
+default and can't be disabled).
 
 [float]
 [[fielddata-filters]]
@@ -487,13 +534,13 @@ Elasticsearch has several builtin formats:
         contained in a very low number of documents.
 
 `pulsing`::
-        A postings format in-lines the posting lists for very low
+        A postings format that in-lines the posting lists for very low
         frequent terms in the term dictionary. This is useful to improve lookup
         performance for low-frequent terms.
 
 `bloom_default`::
         A postings format that uses a bloom filter to
-        improve term lookup performance. This is useful for primarily keys or
+        improve term lookup performance. This is useful for primary keys or
         fields that are used as a delete key.
 
 `bloom_pulsing`::
@@ -578,10 +625,8 @@ custom doc values formats. See
 ==== Similarity
 
 Elasticsearch allows you to configure a similarity (scoring algorithm) per field.
-Allowing users a simpler extension beyond the usual TF/IDF algorithm. As
-part of this, new algorithms have been added including BM25. Also as
-part of the changes, it is now possible to define a Similarity per
-field, giving even greater control over scoring.
+The `similarity` setting provides a simple way of choosing a similarity algorithm
+other than the default TF/IDF, such as `BM25`.
 
 You can configure similarities via the
 <<index-modules-similarity,similarity module>>
@@ -595,10 +640,13 @@ property, as this example shows:
 [source,js]
 --------------------------------------------------
 {
-  "book" : {
-    "properties" : {
-      "title" : { "type" : "string", "similarity" : "BM25" }
-    }
+   "book":{
+      "properties":{
+         "title":{
+            "type":"string", "similarity":"BM25"
+         }
+      }
+   }
 }
 --------------------------------------------------
 
@@ -686,7 +734,7 @@ it gets processed as a not analyzed string and is accessible under the name `nam
 
 The `include_in_all` setting is ignored on any field that is defined in
 the `fields` options. Setting the `include_in_all` only makes sense on
-the main field, since the raw field value to copied to the `_all` field,
+the main field, since the raw field value is copied to the `_all` field,
 the tokens aren't copied.
 
 [float]

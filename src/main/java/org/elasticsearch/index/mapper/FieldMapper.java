@@ -123,6 +123,31 @@ public interface FieldMapper<T> extends Mapper {
         public Term createIndexNameTerm(BytesRef value) {
             return new Term(indexName, value);
         }
+
+        @Override
+        public boolean equals(Object o) {
+            if (o == null || getClass() != o.getClass()) return false;
+
+            Names names = (Names) o;
+
+            if (!fullName.equals(names.fullName)) return false;
+            if (!indexName.equals(names.indexName)) return false;
+            if (!indexNameClean.equals(names.indexNameClean)) return false;
+            if (!name.equals(names.name)) return false;
+            if (!sourcePath.equals(names.sourcePath)) return false;
+
+            return true;
+        }
+
+        @Override
+        public int hashCode() {
+            int result = name.hashCode();
+            result = 31 * result + indexName.hashCode();
+            result = 31 * result + indexNameClean.hashCode();
+            result = 31 * result + fullName.hashCode();
+            result = 31 * result + sourcePath.hashCode();
+            return result;
+        }
     }
 
     public static enum Loading {
@@ -137,15 +162,24 @@ public interface FieldMapper<T> extends Mapper {
             public String toString() {
                 return EAGER_VALUE;
             }
+        },
+        EAGER_GLOBAL_ORDINALS {
+            @Override
+            public String toString() {
+                return EAGER_GLOBAL_ORDINALS_VALUE;
+            }
         };
 
         public static final String KEY = "loading";
+        public static final String EAGER_GLOBAL_ORDINALS_VALUE = "eager_global_ordinals";
         public static final String EAGER_VALUE = "eager";
         public static final String LAZY_VALUE = "lazy";
 
         public static Loading parse(String loading, Loading defaultValue) {
             if (Strings.isNullOrEmpty(loading)) {
                 return defaultValue;
+            } else if (EAGER_GLOBAL_ORDINALS_VALUE.equalsIgnoreCase(loading)) {
+                return EAGER_GLOBAL_ORDINALS;
             } else if (EAGER_VALUE.equalsIgnoreCase(loading)) {
                 return EAGER;
             } else if (LAZY_VALUE.equalsIgnoreCase(loading)) {
@@ -256,4 +290,5 @@ public interface FieldMapper<T> extends Mapper {
     boolean hasDocValues();
 
     Loading normsLoading(Loading defaultLoading);
+
 }

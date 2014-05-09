@@ -30,13 +30,19 @@ import org.elasticsearch.search.aggregations.bucket.range.InternalRange;
 import org.elasticsearch.search.aggregations.bucket.range.date.InternalDateRange;
 import org.elasticsearch.search.aggregations.bucket.range.geodistance.InternalGeoDistance;
 import org.elasticsearch.search.aggregations.bucket.range.ipv4.InternalIPv4Range;
+import org.elasticsearch.search.aggregations.bucket.nested.InternalReverseNested;
+import org.elasticsearch.search.aggregations.bucket.significant.SignificantLongTerms;
+import org.elasticsearch.search.aggregations.bucket.significant.SignificantStringTerms;
+import org.elasticsearch.search.aggregations.bucket.significant.UnmappedSignificantTerms;
 import org.elasticsearch.search.aggregations.bucket.terms.DoubleTerms;
 import org.elasticsearch.search.aggregations.bucket.terms.LongTerms;
 import org.elasticsearch.search.aggregations.bucket.terms.StringTerms;
 import org.elasticsearch.search.aggregations.bucket.terms.UnmappedTerms;
 import org.elasticsearch.search.aggregations.metrics.avg.InternalAvg;
+import org.elasticsearch.search.aggregations.metrics.cardinality.InternalCardinality;
 import org.elasticsearch.search.aggregations.metrics.max.InternalMax;
 import org.elasticsearch.search.aggregations.metrics.min.InternalMin;
+import org.elasticsearch.search.aggregations.metrics.percentiles.InternalPercentiles;
 import org.elasticsearch.search.aggregations.metrics.stats.InternalStats;
 import org.elasticsearch.search.aggregations.metrics.stats.extended.InternalExtendedStats;
 import org.elasticsearch.search.aggregations.metrics.sum.InternalSum;
@@ -58,6 +64,8 @@ public class TransportAggregationModule extends AbstractModule {
         InternalStats.registerStreams();
         InternalExtendedStats.registerStreams();
         InternalValueCount.registerStreams();
+        InternalPercentiles.registerStreams();
+        InternalCardinality.registerStreams();
 
         // buckets
         InternalGlobal.registerStreams();
@@ -65,6 +73,9 @@ public class TransportAggregationModule extends AbstractModule {
         InternalMissing.registerStreams();
         StringTerms.registerStreams();
         LongTerms.registerStreams();
+        SignificantStringTerms.registerStreams();
+        SignificantLongTerms.registerStreams();
+        UnmappedSignificantTerms.registerStreams();
         InternalGeoHashGrid.registerStreams();                
         DoubleTerms.registerStreams();
         UnmappedTerms.registerStreams();
@@ -75,5 +86,6 @@ public class TransportAggregationModule extends AbstractModule {
         InternalDateHistogram.registerStream();
         InternalGeoDistance.registerStream();
         InternalNested.registerStream();
+        InternalReverseNested.registerStream();
     }
 }

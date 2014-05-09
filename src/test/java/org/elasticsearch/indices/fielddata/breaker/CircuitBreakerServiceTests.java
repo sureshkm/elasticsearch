@@ -19,43 +19,45 @@
 
 package org.elasticsearch.indices.fielddata.breaker;
 
-import org.elasticsearch.action.search.SearchPhaseExecutionException;
-import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.common.collect.MapBuilder;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.monitor.jvm.JvmInfo;
+import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
+import org.elasticsearch.test.ElasticsearchIntegrationTest.ClusterScope;
 import org.elasticsearch.test.junit.annotations.TestLogging;
 import org.junit.Test;
 
 import java.util.Arrays;
 
+import static org.elasticsearch.cluster.metadata.IndexMetaData.SETTING_NUMBER_OF_REPLICAS;
 import static org.elasticsearch.common.settings.ImmutableSettings.settingsBuilder;
+import static org.elasticsearch.test.ElasticsearchIntegrationTest.Scope.TEST;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertFailures;
+import static org.hamcrest.CoreMatchers.containsString;
 
 /**
  * Integration tests for InternalCircuitBreakerService
  */
-@ElasticsearchIntegrationTest.ClusterScope(scope = ElasticsearchIntegrationTest.Scope.TEST)
+@ClusterScope(scope = TEST, randomDynamicTemplates = false)
 public class CircuitBreakerServiceTests extends ElasticsearchIntegrationTest {
 
     private String randomRidiculouslySmallLimit() {
         // 3 different ways to say 100 bytes
-        return randomFrom(Arrays.asList("100b", "100", (10000. / JvmInfo.jvmInfo().getMem().getHeapMax().bytes()) + "%"));
+        return randomFrom(Arrays.asList("100b", "100"));
+         //, (10000. / JvmInfo.jvmInfo().getMem().getHeapMax().bytes()) + "%")); // this is prone to rounding errors and will fail if JVM memory changes!
     }
 
     @Test
     @TestLogging("org.elasticsearch.indices.fielddata.breaker:TRACE,org.elasticsearch.index.fielddata:TRACE,org.elasticsearch.common.breaker:TRACE")
     public void testMemoryBreaker() {
-        assertAcked(prepareCreate("cb-test", 1));
+        assertAcked(prepareCreate("cb-test", 1, settingsBuilder().put(SETTING_NUMBER_OF_REPLICAS, between(0, 1))));
         final Client client = client();
 
         try {
-
             // index some different terms so we have some field data for loading
-            int docCount = atLeast(300);
+            int docCount = scaledRandomIntBetween(300, 1000);
             for (long id = 0; id < docCount; id++) {
                 client.prepareIndex("cb-test", "type", Long.toString(id))
                         .setSource(MapBuilder.<String, Object>newMapBuilder().put("test", "value" + id).map()).execute().actionGet();
@@ -80,13 +82,9 @@ public class CircuitBreakerServiceTests extends ElasticsearchIntegrationTest {
 
             // execute a search that loads field data (sorting on the "test" field)
             // again, this time it should trip the breaker
-            try {
-                SearchResponse resp = client.prepareSearch("cb-test").setSource("{\"sort\": \"test\",\"query\":{\"match_all\":{}}}")
-                        .execute().actionGet();
-                assertFailures(resp);
-            } catch (SearchPhaseExecutionException e) {
-            }
-
+            assertFailures(client.prepareSearch("cb-test").setSource("{\"sort\": \"test\",\"query\":{\"match_all\":{}}}"),
+                        RestStatus.INTERNAL_SERVER_ERROR,
+                    containsString("Data too large, data for field [test] would be larger than limit of [100/100b]"));
         } finally {
             // Reset settings
             Settings resetSettings = settingsBuilder()
@@ -103,16 +101,15 @@ public class CircuitBreakerServiceTests extends ElasticsearchIntegrationTest {
         final Client client = client();
 
         try {
-
             // Create an index where the mappings have a field data filter
-            client.admin().indices().prepareCreate("ramtest").setSource("{\"mappings\": {\"type\": {\"properties\": {\"test\": " +
-                    "{\"type\": \"string\",\"fielddata\": {\"filter\": {\"regex\": {\"pattern\": \"^value.*\"}}}}}}}}").execute().actionGet();
+            assertAcked(prepareCreate("ramtest").setSource("{\"mappings\": {\"type\": {\"properties\": {\"test\": " +
+                    "{\"type\": \"string\",\"fielddata\": {\"filter\": {\"regex\": {\"pattern\": \"^value.*\"}}}}}}}}"));
 
             // Wait 10 seconds for green
             client.admin().cluster().prepareHealth("ramtest").setWaitForGreenStatus().setTimeout("10s").execute().actionGet();
 
             // index some different terms so we have some field data for loading
-            int docCount = atLeast(300);
+            int docCount = scaledRandomIntBetween(300, 1000);
             for (long id = 0; id < docCount; id++) {
                 client.prepareIndex("ramtest", "type", Long.toString(id))
                         .setSource(MapBuilder.<String, Object>newMapBuilder().put("test", "value" + id).map()).execute().actionGet();
@@ -137,13 +134,9 @@ public class CircuitBreakerServiceTests extends ElasticsearchIntegrationTest {
 
             // execute a search that loads field data (sorting on the "test" field)
             // again, this time it should trip the breaker
-            try {
-                SearchResponse resp = client.prepareSearch("ramtest").setSource("{\"sort\": \"test\",\"query\":{\"match_all\":{}}}")
-                        .execute().actionGet();
-                assertFailures(resp);
-            } catch (SearchPhaseExecutionException e) {
-            }
-
+            assertFailures(client.prepareSearch("ramtest").setSource("{\"sort\": \"test\",\"query\":{\"match_all\":{}}}"),
+                        RestStatus.INTERNAL_SERVER_ERROR,
+                    containsString("Data too large, data for field [test] would be larger than limit of [100/100b]"));
         } finally {
             // Reset settings
             Settings resetSettings = settingsBuilder()

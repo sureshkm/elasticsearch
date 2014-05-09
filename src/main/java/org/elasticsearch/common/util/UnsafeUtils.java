@@ -23,6 +23,7 @@ import org.apache.lucene.util.BytesRef;
 import sun.misc.Unsafe;
 
 import java.lang.reflect.Field;
+import java.nio.ByteOrder;
 
 /** Utility methods that use {@link Unsafe}. */
 public enum UnsafeUtils {
@@ -72,13 +73,21 @@ public enum UnsafeUtils {
 
     /** Compare the two given {@link BytesRef}s for equality. */
     public static boolean equals(BytesRef b1, BytesRef b2) {
-        int len = b1.length;
-        if (b2.length != len) {
+        if (b1.length != b2.length) {
             return false;
         }
-        int o1 = b1.offset, o2 = b2.offset;
+        return equals(b1.bytes, b1.offset, b2.bytes, b2.offset, b1.length);
+    }
+
+    /**
+     * Compare <code>b1[offset1:offset1+length)</code>against <code>b1[offset2:offset2+length)</code>.
+     */
+    public static boolean equals(byte[] b1, int offset1, byte[] b2, int offset2, int length) {
+        int o1 = offset1;
+        int o2 = offset2;
+        int len = length;
         while (len >= 8) {
-            if (readLong(b1.bytes, o1) != readLong(b2.bytes, o2)) {
+            if (readLong(b1, o1) != readLong(b2, o2)) {
                 return false;
             }
             len -= 8;
@@ -86,7 +95,7 @@ public enum UnsafeUtils {
             o2 += 8;
         }
         if (len >= 4) {
-            if (readInt(b1.bytes, o1) != readInt(b2.bytes, o2)) {
+            if (readInt(b1, o1) != readInt(b2, o2)) {
                 return false;
             }
             len -= 4;
@@ -94,7 +103,7 @@ public enum UnsafeUtils {
             o2 += 4;
         }
         if (len >= 2) {
-            if (readShort(b1.bytes, o1) != readShort(b2.bytes, o2)) {
+            if (readShort(b1, o1) != readShort(b2, o2)) {
                 return false;
             }
             len -= 2;
@@ -102,13 +111,35 @@ public enum UnsafeUtils {
             o2 += 2;
         }
         if (len == 1) {
-            if (readByte(b1.bytes, o1) != readByte(b2.bytes, o2)) {
+            if (readByte(b1, o1) != readByte(b2, o2)) {
                 return false;
             }
         } else {
             assert len == 0;
         }
         return true;
+    }
+
+    /**
+     * Read a long using little endian byte order.
+     */
+    public static long readLongLE(byte[] src, int offset) {
+        long value = readLong(src, offset);
+        if (ByteOrder.nativeOrder() == ByteOrder.BIG_ENDIAN) {
+            value = Long.reverseBytes(value);
+        }
+        return value;
+    }
+
+    /**
+     * Read an int using little endian byte order.
+     */
+    public static int readIntLE(byte[] src, int offset) {
+        int value = readInt(src, offset);
+        if (ByteOrder.nativeOrder() == ByteOrder.BIG_ENDIAN) {
+            value = Integer.reverseBytes(value);
+        }
+        return value;
     }
 
 }

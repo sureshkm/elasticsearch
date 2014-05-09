@@ -31,12 +31,12 @@ public class NoneRecycler<T> extends AbstractRecycler<T> {
 
     @Override
     public V<T> obtain(int sizing) {
-        return new NV<T>(c.newInstance(sizing));
+        return new NV<>(c.newInstance(sizing));
     }
 
     @Override
     public void close() {
-
+        // no-op
     }
 
     public static class NV<T> implements Recycler.V<T> {
@@ -58,12 +58,11 @@ public class NoneRecycler<T> extends AbstractRecycler<T> {
         }
 
         @Override
-        public boolean release() {
+        public void close() {
             if (value == null) {
                 throw new ElasticsearchIllegalStateException("recycler entry already released...");
             }
             value = null;
-            return true;
         }
     }
 }

@@ -42,14 +42,14 @@ public class AssertingLocalTransport extends LocalTransport {
     @Inject
     public AssertingLocalTransport(Settings settings, ThreadPool threadPool, Version version) {
         super(settings, threadPool, version);
-        final long seed = settings.getAsLong(ElasticsearchIntegrationTest.INDEX_SEED_SETTING, 0l);
+        final long seed = settings.getAsLong(ElasticsearchIntegrationTest.SETTING_INDEX_SEED, 0l);
         random = new Random(seed);
     }
 
     @Override
-    protected void handleParsedRespone(final TransportResponse response, final TransportResponseHandler handler) {
+    protected void handleParsedResponse(final TransportResponse response, final TransportResponseHandler handler) {
         ElasticsearchAssertions.assertVersionSerializable(ElasticsearchTestCase.randomVersion(random), response);
-        super.handleParsedRespone(response, handler);
+        super.handleParsedResponse(response, handler);
     }
     
     @Override

@@ -19,6 +19,7 @@
 
 package org.elasticsearch.action.deletebyquery;
 
+import org.elasticsearch.Version;
 import org.elasticsearch.action.ActionRequestValidationException;
 import org.elasticsearch.action.support.replication.IndexReplicationOperationRequest;
 import org.elasticsearch.common.Nullable;
@@ -45,8 +46,11 @@ public class IndexDeleteByQueryRequest extends IndexReplicationOperationRequest<
     private Set<String> routing;
     @Nullable
     private String[] filteringAliases;
+    private long nowInMillis;
 
-    IndexDeleteByQueryRequest(DeleteByQueryRequest request, String index, @Nullable Set<String> routing, @Nullable String[] filteringAliases) {
+    IndexDeleteByQueryRequest(DeleteByQueryRequest request, String index, @Nullable Set<String> routing, @Nullable String[] filteringAliases,
+                              long nowInMillis
+    ) {
         this.index = index;
         this.timeout = request.timeout();
         this.source = request.source();
@@ -55,6 +59,7 @@ public class IndexDeleteByQueryRequest extends IndexReplicationOperationRequest<
         this.consistencyLevel = request.consistencyLevel();
         this.routing = routing;
         this.filteringAliases = filteringAliases;
+        this.nowInMillis = nowInMillis;
     }
 
     IndexDeleteByQueryRequest() {
@@ -85,6 +90,10 @@ public class IndexDeleteByQueryRequest extends IndexReplicationOperationRequest<
         return filteringAliases;
     }
 
+    long nowInMillis() {
+        return nowInMillis;
+    }
+
     public IndexDeleteByQueryRequest timeout(TimeValue timeout) {
         this.timeout = timeout;
         return this;
@@ -102,7 +111,7 @@ public class IndexDeleteByQueryRequest extends IndexReplicationOperationRequest<
         }
         int routingSize = in.readVInt();
         if (routingSize > 0) {
-            routing = new HashSet<String>(routingSize);
+            routing = new HashSet<>(routingSize);
             for (int i = 0; i < routingSize; i++) {
                 routing.add(in.readString());
             }
@@ -113,6 +122,11 @@ public class IndexDeleteByQueryRequest extends IndexReplicationOperationRequest<
             for (int i = 0; i < aliasesSize; i++) {
                 filteringAliases[i] = in.readString();
             }
+        }
+        if (in.getVersion().onOrAfter(Version.V_1_2_0)) {
+            nowInMillis = in.readVLong();
+        } else {
+            nowInMillis = System.currentTimeMillis();
         }
     }
 
@@ -138,6 +152,9 @@ public class IndexDeleteByQueryRequest extends IndexReplicationOperationRequest<
             }
         } else {
             out.writeVInt(0);
+        }
+        if (out.getVersion().onOrAfter(Version.V_1_2_0)) {
+            out.writeVLong(nowInMillis);
         }
     }
 }

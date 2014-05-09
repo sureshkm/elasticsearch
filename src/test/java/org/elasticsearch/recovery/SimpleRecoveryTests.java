@@ -19,8 +19,6 @@
 
 package org.elasticsearch.recovery;
 
-import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse;
-import org.elasticsearch.action.admin.cluster.health.ClusterHealthStatus;
 import org.elasticsearch.action.admin.indices.flush.FlushResponse;
 import org.elasticsearch.action.admin.indices.refresh.RefreshResponse;
 import org.elasticsearch.action.get.GetResponse;
@@ -30,50 +28,50 @@ import org.elasticsearch.test.ElasticsearchIntegrationTest;
 import org.junit.Test;
 
 import static org.elasticsearch.client.Requests.*;
+import static org.elasticsearch.common.settings.ImmutableSettings.settingsBuilder;
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.hamcrest.Matchers.equalTo;
 
-/**
- *
- */
 public class SimpleRecoveryTests extends ElasticsearchIntegrationTest {
 
     @Override
     public Settings indexSettings() {
-        return recoverySettings();
+        return settingsBuilder().put(super.indexSettings()).put(recoverySettings()).build();
     }
-    
+
     protected Settings recoverySettings() {
         return ImmutableSettings.Builder.EMPTY_SETTINGS;
     }
 
+    @Override
+    protected int maximumNumberOfReplicas() {
+        return 1;
+    }
+
     @Test
     public void testSimpleRecovery() throws Exception {
-        prepareCreate("test", 1).execute().actionGet(5000);
+        assertAcked(prepareCreate("test", 1).execute().actionGet(5000));
+
+        NumShards numShards = getNumShards("test");
 
         logger.info("Running Cluster Health");
-        ClusterHealthResponse clusterHealth = client().admin().cluster().health(clusterHealthRequest().waitForYellowStatus()).actionGet();
-        logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
-        assertThat(clusterHealth.isTimedOut(), equalTo(false));
-        assertThat(clusterHealth.getStatus(), equalTo(ClusterHealthStatus.YELLOW));
+        ensureYellow();
 
         client().index(indexRequest("test").type("type1").id("1").source(source("1", "test"))).actionGet();
         FlushResponse flushResponse = client().admin().indices().flush(flushRequest("test")).actionGet();
-        assertThat(flushResponse.getTotalShards(), equalTo(10));
-        assertThat(flushResponse.getSuccessfulShards(), equalTo(5));
+        assertThat(flushResponse.getTotalShards(), equalTo(numShards.totalNumShards));
+        assertThat(flushResponse.getSuccessfulShards(), equalTo(numShards.numPrimaries));
         assertThat(flushResponse.getFailedShards(), equalTo(0));
         client().index(indexRequest("test").type("type1").id("2").source(source("2", "test"))).actionGet();
         RefreshResponse refreshResponse = client().admin().indices().refresh(refreshRequest("test")).actionGet();
-        assertThat(refreshResponse.getTotalShards(), equalTo(10));
-        assertThat(refreshResponse.getSuccessfulShards(), equalTo(5));
+        assertThat(refreshResponse.getTotalShards(), equalTo(numShards.totalNumShards));
+        assertThat(refreshResponse.getSuccessfulShards(), equalTo(numShards.numPrimaries));
         assertThat(refreshResponse.getFailedShards(), equalTo(0));
 
         allowNodes("test", 2);
 
         logger.info("Running Cluster Health");
-        clusterHealth = client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus().local(true).waitForNodes(">=2")).actionGet();
-        logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
-        assertThat(clusterHealth.isTimedOut(), equalTo(false));
-        assertThat(clusterHealth.getStatus(), equalTo(ClusterHealthStatus.GREEN));
+        ensureGreen();
 
         GetResponse getResult;
 
@@ -92,10 +90,7 @@ public class SimpleRecoveryTests extends ElasticsearchIntegrationTest {
         allowNodes("test", 3);
         Thread.sleep(200);
         logger.info("Running Cluster Health");
-        clusterHealth = client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForRelocatingShards(0).waitForNodes(">=3")).actionGet();
-        logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
-        assertThat(clusterHealth.isTimedOut(), equalTo(false));
-        assertThat(clusterHealth.getStatus(), equalTo(ClusterHealthStatus.GREEN));
+        ensureGreen();
 
         for (int i = 0; i < 5; i++) {
             getResult = client().get(getRequest("test").type("type1").id("1")).actionGet(1000);

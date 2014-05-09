@@ -19,7 +19,6 @@
 
 package org.elasticsearch.action.admin.indices.validate.query;
 
-import jsr166y.ThreadLocalRandom;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.ShardOperationFailedException;
@@ -36,6 +35,7 @@ import org.elasticsearch.cluster.routing.GroupShardsIterator;
 import org.elasticsearch.cluster.routing.ShardRouting;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.util.BigArrays;
 import org.elasticsearch.index.query.IndexQueryParserService;
 import org.elasticsearch.index.query.ParsedQuery;
 import org.elasticsearch.index.query.QueryParsingException;
@@ -52,6 +52,7 @@ import org.elasticsearch.transport.TransportService;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
 import static com.google.common.collect.Lists.newArrayList;
@@ -69,13 +70,16 @@ public class TransportValidateQueryAction extends TransportBroadcastOperationAct
 
     private final PageCacheRecycler pageCacheRecycler;
 
+    private final BigArrays bigArrays;
+
     @Inject
-    public TransportValidateQueryAction(Settings settings, ThreadPool threadPool, ClusterService clusterService, TransportService transportService, IndicesService indicesService, ScriptService scriptService, CacheRecycler cacheRecycler, PageCacheRecycler pageCacheRecycler) {
+    public TransportValidateQueryAction(Settings settings, ThreadPool threadPool, ClusterService clusterService, TransportService transportService, IndicesService indicesService, ScriptService scriptService, CacheRecycler cacheRecycler, PageCacheRecycler pageCacheRecycler, BigArrays bigArrays) {
         super(settings, threadPool, clusterService, transportService);
         this.indicesService = indicesService;
         this.scriptService = scriptService;
         this.cacheRecycler = cacheRecycler;
         this.pageCacheRecycler = pageCacheRecycler;
+        this.bigArrays = bigArrays;
     }
 
     @Override
@@ -184,7 +188,7 @@ public class TransportValidateQueryAction extends TransportBroadcastOperationAct
             SearchContext.setCurrent(new DefaultSearchContext(0,
                     new ShardSearchRequest().types(request.types()).nowInMillis(request.nowInMillis()),
                     null, indexShard.acquireSearcher("validate_query"), indexService, indexShard,
-                    scriptService, cacheRecycler, pageCacheRecycler));
+                    scriptService, cacheRecycler, pageCacheRecycler, bigArrays));
             try {
                 ParsedQuery parsedQuery = queryParserService.parseQuery(request.source());
                 valid = true;
@@ -198,7 +202,7 @@ public class TransportValidateQueryAction extends TransportBroadcastOperationAct
                 valid = false;
                 error = e.getMessage();
             } finally {
-                SearchContext.current().release();
+                SearchContext.current().close();
                 SearchContext.removeCurrent();
             }
         }

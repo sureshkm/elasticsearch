@@ -24,6 +24,7 @@ import org.apache.lucene.search.FieldComparator;
 import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.index.fielddata.BytesValues;
 import org.elasticsearch.index.fielddata.IndexFieldData;
+import org.elasticsearch.search.MultiValueMode;
 
 import java.io.IOException;
 
@@ -36,14 +37,15 @@ import java.io.IOException;
 public final class BytesRefValComparator extends NestedWrappableComparator<BytesRef> {
 
     private final IndexFieldData<?> indexFieldData;
-    private final SortMode sortMode;
+    private final MultiValueMode sortMode;
     private final BytesRef missingValue;
 
     private final BytesRef[] values;
     private BytesRef bottom;
+    private BytesRef top;
     private BytesValues docTerms;
 
-    BytesRefValComparator(IndexFieldData<?> indexFieldData, int numHits, SortMode sortMode, BytesRef missingValue) {
+    BytesRefValComparator(IndexFieldData<?> indexFieldData, int numHits, MultiValueMode sortMode, BytesRef missingValue) {
         this.sortMode = sortMode;
         values = new BytesRef[numHits];
         this.indexFieldData = indexFieldData;
@@ -61,6 +63,11 @@ public final class BytesRefValComparator extends NestedWrappableComparator<Bytes
     public int compareBottom(int doc) throws IOException {
         BytesRef val2 = sortMode.getRelevantValue(docTerms, doc, missingValue);
         return compareValues(bottom, val2);
+    }
+
+    @Override
+    public int compareTop(int doc) throws IOException {
+        return  top.compareTo(sortMode.getRelevantValue(docTerms, doc, missingValue));
     }
 
     @Override
@@ -88,6 +95,11 @@ public final class BytesRefValComparator extends NestedWrappableComparator<Bytes
     }
 
     @Override
+    public void setTopValue(BytesRef top) {
+        this.top = top;
+    }
+
+    @Override
     public BytesRef value(int slot) {
         return values[slot];
     }
@@ -106,11 +118,6 @@ public final class BytesRefValComparator extends NestedWrappableComparator<Bytes
     }
 
     @Override
-    public int compareDocToValue(int doc, BytesRef value) {
-        return  sortMode.getRelevantValue(docTerms, doc, missingValue).compareTo(value);
-    }
-
-    @Override
     public void missing(int slot) {
         values[slot] = missingValue;
     }
@@ -120,4 +127,8 @@ public final class BytesRefValComparator extends NestedWrappableComparator<Bytes
         return compareValues(bottom, missingValue);
     }
 
+    @Override
+    public int compareTopMissing() {
+        return compareValues(top, missingValue);
+    }
 }

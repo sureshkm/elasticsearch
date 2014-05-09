@@ -209,7 +209,7 @@ public class MatchQuery {
                 if (commonTermsCutoff == null) {
                     query = builder.createBooleanQuery(field, value.toString(), occur);
                 } else {
-                    query = builder.createCommonTermsQuery(field, value.toString(), occur, occur, commonTermsCutoff);
+                    query = builder.createCommonTermsQuery(field, value.toString(), occur, occur, commonTermsCutoff, mapper);
                 }
                 break;
             case PHRASE:
@@ -251,11 +251,12 @@ public class MatchQuery {
 
 
         public Query createPhrasePrefixQuery(String field, String queryText, int phraseSlop, int maxExpansions) {
-            Query query = createFieldQuery(getAnalyzer(), Occur.MUST, field, queryText, true, phraseSlop);
+            final Query query = createFieldQuery(getAnalyzer(), Occur.MUST, field, queryText, true, phraseSlop);
+            final MultiPhrasePrefixQuery prefixQuery = new MultiPhrasePrefixQuery();
+            prefixQuery.setMaxExpansions(maxExpansions);
+            prefixQuery.setSlop(phraseSlop);
             if (query instanceof PhraseQuery) {
                 PhraseQuery pq = (PhraseQuery)query;
-                MultiPhrasePrefixQuery prefixQuery = new MultiPhrasePrefixQuery();
-                prefixQuery.setMaxExpansions(maxExpansions);
                 Term[] terms = pq.getTerms();
                 int[] positions = pq.getPositions();
                 for (int i = 0; i < terms.length; i++) {
@@ -264,23 +265,24 @@ public class MatchQuery {
                 return prefixQuery;
             } else if (query instanceof MultiPhraseQuery) {
                 MultiPhraseQuery pq = (MultiPhraseQuery)query;
-                MultiPhrasePrefixQuery prefixQuery = new MultiPhrasePrefixQuery();
-                prefixQuery.setMaxExpansions(maxExpansions);
                 List<Term[]> terms = pq.getTermArrays();
                 int[] positions = pq.getPositions();
                 for (int i = 0; i < terms.size(); i++) {
                     prefixQuery.add(terms.get(i), positions[i]);
                 }
                 return prefixQuery;
+            } else if (query instanceof TermQuery) {
+                prefixQuery.add(((TermQuery) query).getTerm());
+                return prefixQuery;
             }
             return query;
         }
 
-        public Query createCommonTermsQuery(String field, String queryText, Occur highFreqOccur, Occur lowFreqOccur, float maxTermFrequency) {
+        public Query createCommonTermsQuery(String field, String queryText, Occur highFreqOccur, Occur lowFreqOccur, float maxTermFrequency, FieldMapper<?> mapper) {
             Query booleanQuery = createBooleanQuery(field, queryText, Occur.SHOULD);
             if (booleanQuery != null && booleanQuery instanceof BooleanQuery) {
                 BooleanQuery bq = (BooleanQuery) booleanQuery;
-                ExtendedCommonTermsQuery query = new ExtendedCommonTermsQuery(highFreqOccur, lowFreqOccur, maxTermFrequency, ((BooleanQuery)booleanQuery).isCoordDisabled());
+                ExtendedCommonTermsQuery query = new ExtendedCommonTermsQuery(highFreqOccur, lowFreqOccur, maxTermFrequency, ((BooleanQuery)booleanQuery).isCoordDisabled(), mapper);
                 for (BooleanClause clause : bq.clauses()) {
                     if (!(clause.getQuery() instanceof TermQuery)) {
                         return booleanQuery;

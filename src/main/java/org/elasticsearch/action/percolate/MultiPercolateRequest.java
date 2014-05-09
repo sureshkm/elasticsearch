@@ -48,7 +48,7 @@ public class MultiPercolateRequest extends ActionRequest<MultiPercolateRequest> 
 
     private String[] indices;
     private String documentType;
-    private IndicesOptions indicesOptions = IndicesOptions.strict();
+    private IndicesOptions indicesOptions = IndicesOptions.strictExpandOpen();
     private List<PercolateRequest> requests = Lists.newArrayList();
 
     public MultiPercolateRequest add(PercolateRequestBuilder requestBuilder) {
@@ -62,7 +62,7 @@ public class MultiPercolateRequest extends ActionRequest<MultiPercolateRequest> 
         if (request.documentType() == null && documentType != null) {
             request.documentType(documentType);
         }
-        if (request.indicesOptions() == IndicesOptions.strict() && indicesOptions != IndicesOptions.strict()) {
+        if (request.indicesOptions() == IndicesOptions.strictExpandOpen() && indicesOptions != IndicesOptions.strictExpandOpen()) {
             request.indicesOptions(indicesOptions);
         }
         requests.add(request);
@@ -96,14 +96,13 @@ public class MultiPercolateRequest extends ActionRequest<MultiPercolateRequest> 
             if (documentType != null) {
                 percolateRequest.documentType(documentType);
             }
-            if (indicesOptions != IndicesOptions.strict()) {
+            if (indicesOptions != IndicesOptions.strictExpandOpen()) {
                 percolateRequest.indicesOptions(indicesOptions);
             }
 
             // now parse the action
             if (nextMarker - from > 0) {
-                XContentParser parser = xContent.createParser(data.slice(from, nextMarker - from));
-                try {
+                try (XContentParser parser = xContent.createParser(data.slice(from, nextMarker - from))) {
                     // Move to START_OBJECT, if token is null, its an empty data
                     XContentParser.Token token = parser.nextToken();
                     if (token != null) {
@@ -127,8 +126,6 @@ public class MultiPercolateRequest extends ActionRequest<MultiPercolateRequest> 
                             throw new ElasticsearchParseException(percolateAction + " isn't a supported percolate operation");
                         }
                     }
-                } finally {
-                    parser.close();
                 }
             }
 
@@ -154,7 +151,7 @@ public class MultiPercolateRequest extends ActionRequest<MultiPercolateRequest> 
     private void parsePercolateAction(XContentParser parser, PercolateRequest percolateRequest, boolean allowExplicitIndex) throws IOException {
         String globalIndex = indices != null && indices.length > 0 ? indices[0] : null;
 
-        Map<String, Object> header = new HashMap<String, Object>();
+        Map<String, Object> header = new HashMap<>();
 
         String currentFieldName = null;
         XContentParser.Token token;
@@ -168,10 +165,10 @@ public class MultiPercolateRequest extends ActionRequest<MultiPercolateRequest> 
             }
         }
 
-        boolean ignoreUnavailable = IndicesOptions.strict().ignoreUnavailable();
-        boolean allowNoIndices = IndicesOptions.strict().allowNoIndices();
-        boolean expandWildcardsOpen = IndicesOptions.strict().expandWildcardsOpen();
-        boolean expandWildcardsClosed = IndicesOptions.strict().expandWildcardsClosed();
+        boolean ignoreUnavailable = IndicesOptions.strictExpandOpen().ignoreUnavailable();
+        boolean allowNoIndices = IndicesOptions.strictExpandOpen().allowNoIndices();
+        boolean expandWildcardsOpen = IndicesOptions.strictExpandOpen().expandWildcardsOpen();
+        boolean expandWildcardsClosed = IndicesOptions.strictExpandOpen().expandWildcardsClosed();
 
         if (header.containsKey("id")) {
             GetRequest getRequest = new GetRequest(globalIndex);
@@ -287,7 +284,7 @@ public class MultiPercolateRequest extends ActionRequest<MultiPercolateRequest> 
     }
 
     private String[] parseArray(XContentParser parser) throws IOException {
-        final List<String> list = new ArrayList<String>();
+        final List<String> list = new ArrayList<>();
         assert parser.currentToken() == XContentParser.Token.START_ARRAY;
         while (parser.nextToken() != XContentParser.Token.END_ARRAY) {
             list.add(parser.text());

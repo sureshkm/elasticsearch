@@ -21,8 +21,6 @@ package org.elasticsearch.search.aggregations.bucket;
 import com.google.common.collect.Sets;
 import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.action.search.SearchResponse;
-import org.elasticsearch.common.settings.ImmutableSettings;
-import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.DistanceUnit;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.search.aggregations.bucket.histogram.Histogram;
@@ -30,7 +28,6 @@ import org.elasticsearch.search.aggregations.bucket.range.geodistance.GeoDistanc
 import org.elasticsearch.search.aggregations.bucket.terms.Terms;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
 import org.hamcrest.Matchers;
-import org.junit.Before;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -49,15 +46,8 @@ import static org.hamcrest.core.IsNull.notNullValue;
 /**
  *
  */
+@ElasticsearchIntegrationTest.SuiteScopeTest
 public class GeoDistanceTests extends ElasticsearchIntegrationTest {
-
-    @Override
-    public Settings indexSettings() {
-        return ImmutableSettings.builder()
-                .put("index.number_of_shards", between(1, 5))
-                .put("index.number_of_replicas", between(0, 1))
-                .build();
-    }
 
     private IndexRequestBuilder indexCity(String idx, String name, String... latLons) throws Exception {
         XContentBuilder source = jsonBuilder().startObject().field("city", name);
@@ -70,8 +60,7 @@ public class GeoDistanceTests extends ElasticsearchIntegrationTest {
         return client().prepareIndex(idx, "type").setSource(source);
     }
 
-    @Before
-    public void init() throws Exception {
+    public void setupSuiteScopeCluster() throws Exception {
         prepareCreate("idx")
                 .addMapping("type", "location", "type=geo_point", "city", "type=string,index=not_analyzed")
                 .execute().actionGet();
@@ -82,7 +71,7 @@ public class GeoDistanceTests extends ElasticsearchIntegrationTest {
 
         createIndex("idx_unmapped");
 
-        List<IndexRequestBuilder> cities = new ArrayList<IndexRequestBuilder>();
+        List<IndexRequestBuilder> cities = new ArrayList<>();
         cities.addAll(Arrays.asList(
                 // below 500km
                 indexCity("idx", "utrecht", "52.0945, 5.116"),
@@ -114,7 +103,16 @@ public class GeoDistanceTests extends ElasticsearchIntegrationTest {
             }
         }
         indexRandom(true, cities);
-
+        prepareCreate("empty_bucket_idx").addMapping("type", "value", "type=integer", "location", "type=geo_point").execute().actionGet();
+        List<IndexRequestBuilder> builders = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            builders.add(client().prepareIndex("empty_bucket_idx", "type", "" + i).setSource(jsonBuilder()
+                    .startObject()
+                    .field("value", i * 2)
+                    .field("location", "52.0945, 5.116")
+                    .endObject()));
+        }
+        indexRandom(true, builders.toArray(new IndexRequestBuilder[builders.size()]));
         ensureSearchable();
     }
 
@@ -358,17 +356,6 @@ public class GeoDistanceTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void emptyAggregation() throws Exception {
-        prepareCreate("empty_bucket_idx").addMapping("type", "value", "type=integer", "location", "type=geo_point").execute().actionGet();
-        List<IndexRequestBuilder> builders = new ArrayList<IndexRequestBuilder>();
-        for (int i = 0; i < 2; i++) {
-            builders.add(client().prepareIndex("empty_bucket_idx", "type", "" + i).setSource(jsonBuilder()
-                    .startObject()
-                    .field("value", i * 2)
-                    .field("location", "52.0945, 5.116")
-                    .endObject()));
-        }
-        indexRandom(true, builders.toArray(new IndexRequestBuilder[builders.size()]));
-
         SearchResponse searchResponse = client().prepareSearch("empty_bucket_idx")
                 .setQuery(matchAllQuery())
                 .addAggregation(histogram("histo").field("value").interval(1l).minDocCount(0)
@@ -382,7 +369,7 @@ public class GeoDistanceTests extends ElasticsearchIntegrationTest {
         assertThat(bucket, Matchers.notNullValue());
 
         GeoDistance geoDistance = bucket.getAggregations().get("geo_dist");
-        List<GeoDistance.Bucket> buckets = new ArrayList<GeoDistance.Bucket>(geoDistance.getBuckets());
+        List<GeoDistance.Bucket> buckets = new ArrayList<>(geoDistance.getBuckets());
         assertThat(geoDistance, Matchers.notNullValue());
         assertThat(geoDistance.getName(), equalTo("geo_dist"));
         assertThat(buckets.size(), is(1));

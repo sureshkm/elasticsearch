@@ -27,7 +27,6 @@ import org.elasticsearch.ElasticsearchIllegalArgumentException;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
-import org.elasticsearch.common.io.FileSystemUtils;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.io.stream.Streamable;
@@ -76,6 +75,7 @@ public class ThreadPool extends AbstractComponent {
         public static final String WARMER = "warmer";
         public static final String SNAPSHOT = "snapshot";
         public static final String OPTIMIZE = "optimize";
+        public static final String BENCH = "bench";
     }
 
     public static final String THREADPOOL_GROUP = "threadpool.";
@@ -84,7 +84,7 @@ public class ThreadPool extends AbstractComponent {
 
     private final ImmutableMap<String, Settings> defaultExecutorTypeSettings;
 
-    private final Queue<ExecutorHolder> retiredExecutors = new ConcurrentLinkedQueue<ExecutorHolder>();
+    private final Queue<ExecutorHolder> retiredExecutors = new ConcurrentLinkedQueue<>();
 
     private final ScheduledThreadPoolExecutor scheduler;
 
@@ -118,6 +118,7 @@ public class ThreadPool extends AbstractComponent {
                 .put(Names.WARMER, settingsBuilder().put("type", "scaling").put("keep_alive", "5m").put("size", halfProcMaxAt5).build())
                 .put(Names.SNAPSHOT, settingsBuilder().put("type", "scaling").put("keep_alive", "5m").put("size", halfProcMaxAt5).build())
                 .put(Names.OPTIMIZE, settingsBuilder().put("type", "fixed").put("size", 1).build())
+                .put(Names.BENCH, settingsBuilder().put("type", "scaling").put("keep_alive", "5m").put("size", halfProcMaxAt5).build())
                 .build();
 
         Map<String, ExecutorHolder> executors = Maps.newHashMap();
@@ -146,7 +147,7 @@ public class ThreadPool extends AbstractComponent {
     }
 
     public ThreadPoolInfo info() {
-        List<Info> infos = new ArrayList<Info>();
+        List<Info> infos = new ArrayList<>();
         for (ExecutorHolder holder : executors.values()) {
             String name = holder.info.getName();
             // no need to have info on "same" thread pool
@@ -167,7 +168,7 @@ public class ThreadPool extends AbstractComponent {
     }
 
     public ThreadPoolStats stats() {
-        List<ThreadPoolStats.Stats> stats = new ArrayList<ThreadPoolStats.Stats>();
+        List<ThreadPoolStats.Stats> stats = new ArrayList<>();
         for (ExecutorHolder holder : executors.values()) {
             String name = holder.info.getName();
             // no need to have info on "same" thread pool
@@ -499,6 +500,7 @@ public class ThreadPool extends AbstractComponent {
         EstimatedTimeThread(String name, long interval) {
             super(name);
             this.interval = interval;
+            this.estimatedTimeInMillis = System.currentTimeMillis();
             setDaemon(true);
         }
 
@@ -515,11 +517,6 @@ public class ThreadPool extends AbstractComponent {
                 } catch (InterruptedException e) {
                     running = false;
                     return;
-                }
-                try {
-                    FileSystemUtils.checkMkdirsStall(estimatedTimeInMillis);
-                } catch (Exception e) {
-                    // ignore
                 }
             }
         }

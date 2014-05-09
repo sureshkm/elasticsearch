@@ -21,7 +21,7 @@ package org.elasticsearch.index.snapshots;
 
 import org.elasticsearch.cluster.metadata.SnapshotId;
 import org.elasticsearch.index.deletionpolicy.SnapshotIndexCommit;
-import org.elasticsearch.index.gateway.RecoveryStatus;
+import org.elasticsearch.indices.recovery.RecoveryState;
 import org.elasticsearch.index.shard.ShardId;
 
 /**
@@ -56,8 +56,17 @@ public interface IndexShardRepository {
      * @param snapshotId      snapshot id
      * @param shardId         shard id (in the current index)
      * @param snapshotShardId shard id (in the snapshot)
-     * @param recoveryStatus  recovery status
+     * @param recoveryState   recovery state
      */
-    void restore(SnapshotId snapshotId, ShardId shardId, ShardId snapshotShardId, RecoveryStatus recoveryStatus);
+    void restore(SnapshotId snapshotId, ShardId shardId, ShardId snapshotShardId, RecoveryState recoveryState);
+
+    /**
+     * Retrieve shard snapshot status for the stored snapshot
+     *
+     * @param snapshotId snapshot id
+     * @param shardId    shard id
+     * @return snapshot status
+     */
+    IndexShardSnapshotStatus snapshotStatus(SnapshotId snapshotId, ShardId shardId);
 
 }

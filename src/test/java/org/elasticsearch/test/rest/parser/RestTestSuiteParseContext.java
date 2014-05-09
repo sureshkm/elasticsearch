@@ -44,20 +44,20 @@ public class RestTestSuiteParseContext {
         EXECUTABLE_SECTIONS_PARSERS.put("is_true", new IsTrueParser());
         EXECUTABLE_SECTIONS_PARSERS.put("is_false", new IsFalseParser());
         EXECUTABLE_SECTIONS_PARSERS.put("gt", new GreaterThanParser());
+        EXECUTABLE_SECTIONS_PARSERS.put("gte", new GreaterThanEqualToParser());
         EXECUTABLE_SECTIONS_PARSERS.put("lt", new LessThanParser());
+        EXECUTABLE_SECTIONS_PARSERS.put("lte", new LessThanOrEqualToParser());
         EXECUTABLE_SECTIONS_PARSERS.put("length", new LengthParser());
     }
 
     private final String api;
     private final String suiteName;
     private final XContentParser parser;
-    private final String currentVersion;
 
-    public RestTestSuiteParseContext(String api, String suiteName, XContentParser parser, String currentVersion) {
+    public RestTestSuiteParseContext(String api, String suiteName, XContentParser parser) {
         this.api = api;
         this.suiteName = suiteName;
         this.parser = parser;
-        this.currentVersion = currentVersion;
     }
 
     public String getApi() {
@@ -70,10 +70,6 @@ public class RestTestSuiteParseContext {
 
     public XContentParser parser() {
         return parser;
-    }
-
-    public String getCurrentVersion() {
-        return currentVersion;
     }
 
     public SetupSection parseSetupSection() throws IOException, RestTestParseException {

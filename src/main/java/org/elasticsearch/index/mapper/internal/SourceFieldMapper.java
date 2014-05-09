@@ -249,10 +249,6 @@ public class SourceFieldMapper extends AbstractFieldMapper<byte[]> implements In
     }
 
     @Override
-    public void validate(ParseContext context) throws MapperParsingException {
-    }
-
-    @Override
     public boolean includeInObject() {
         return false;
     }
@@ -341,7 +337,9 @@ public class SourceFieldMapper extends AbstractFieldMapper<byte[]> implements In
                 }
             }
         }
-        assert source.hasArray();
+        if (!source.hasArray()) {
+            source = source.toBytesArray();
+        }
         fields.add(new StoredField(names().indexName(), source.array(), source.arrayOffset(), source.length()));
     }
 

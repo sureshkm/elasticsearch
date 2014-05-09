@@ -20,40 +20,40 @@
 package org.elasticsearch.gateway.local;
 
 import org.apache.lucene.util.LuceneTestCase.Slow;
-import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse;
-import org.elasticsearch.action.admin.cluster.health.ClusterHealthStatus;
-import org.elasticsearch.action.admin.indices.status.IndexShardStatus;
-import org.elasticsearch.action.admin.indices.status.IndicesStatusResponse;
-import org.elasticsearch.action.admin.indices.status.ShardStatus;
+import org.elasticsearch.action.admin.indices.recovery.RecoveryResponse;
+import org.elasticsearch.action.admin.indices.recovery.ShardRecoveryResponse;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.routing.allocation.allocator.BalancedShardsAllocator;
 import org.elasticsearch.cluster.routing.allocation.decider.DisableAllocationDecider;
-import org.elasticsearch.common.Priority;
 import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.index.query.FilterBuilders;
 import org.elasticsearch.index.query.QueryBuilders;
+import org.elasticsearch.indices.recovery.RecoveryState;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
 import org.elasticsearch.test.ElasticsearchIntegrationTest.ClusterScope;
-import org.elasticsearch.test.ElasticsearchIntegrationTest.Scope;
 import org.elasticsearch.test.TestCluster.RestartCallback;
+import org.elasticsearch.test.store.MockDirectoryHelper;
 import org.junit.Test;
 
-import static org.elasticsearch.client.Requests.clusterHealthRequest;
+import static org.elasticsearch.cluster.metadata.IndexMetaData.SETTING_NUMBER_OF_REPLICAS;
+import static org.elasticsearch.cluster.metadata.IndexMetaData.SETTING_NUMBER_OF_SHARDS;
 import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
 import static org.elasticsearch.index.query.QueryBuilders.matchAllQuery;
 import static org.elasticsearch.index.query.QueryBuilders.termQuery;
+import static org.elasticsearch.test.ElasticsearchIntegrationTest.*;
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertHitCount;
 import static org.hamcrest.Matchers.*;
 
 /**
  *
  */
-@ClusterScope(numNodes = 0, scope = Scope.TEST)
+@ClusterScope(numDataNodes = 0, scope = Scope.TEST)
+@Slow
 public class SimpleRecoveryLocalGatewayTests extends ElasticsearchIntegrationTest {
-
 
     private ImmutableSettings.Builder settingsBuilder() {
         return ImmutableSettings.settingsBuilder().put("gateway.type", "local");
@@ -63,12 +63,12 @@ public class SimpleRecoveryLocalGatewayTests extends ElasticsearchIntegrationTes
     @Slow
     public void testX() throws Exception {
 
-        cluster().startNode(settingsBuilder().put("index.number_of_shards", 1).build());
+        cluster().startNode(settingsBuilder().build());
 
         String mapping = XContentFactory.jsonBuilder().startObject().startObject("type1")
                 .startObject("properties").startObject("appAccountIds").field("type", "string").endObject().endObject()
                 .endObject().endObject().string();
-        client().admin().indices().prepareCreate("test").addMapping("type1", mapping).execute().actionGet();
+        assertAcked(prepareCreate("test").addMapping("type1", mapping));
 
         client().prepareIndex("test", "type1", "10990239").setSource(jsonBuilder().startObject()
                 .field("_id", "10990239")
@@ -86,15 +86,12 @@ public class SimpleRecoveryLocalGatewayTests extends ElasticsearchIntegrationTes
                 .field("_id", "11026351")
                 .startArray("appAccountIds").value(14).endArray().endObject()).execute().actionGet();
 
-        client().admin().indices().prepareRefresh().execute().actionGet();
+        refresh();
         assertHitCount(client().prepareCount().setQuery(termQuery("appAccountIds", 179)).execute().actionGet(), 2);
         cluster().fullRestart();
 
         logger.info("Running Cluster Health (wait for the shards to startup)");
-        ClusterHealthResponse clusterHealth = client().admin().cluster().health(clusterHealthRequest().waitForYellowStatus().waitForActiveShards(1)).actionGet();
-        logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
-        assertThat(clusterHealth.isTimedOut(), equalTo(false));
-        assertThat(clusterHealth.getStatus(), equalTo(ClusterHealthStatus.YELLOW));
+        ensureYellow();
 
         client().admin().indices().prepareRefresh().execute().actionGet();
         assertHitCount(client().prepareCount().setQuery(termQuery("appAccountIds", 179)).execute().actionGet(), 2);
@@ -102,10 +99,7 @@ public class SimpleRecoveryLocalGatewayTests extends ElasticsearchIntegrationTes
         cluster().fullRestart();
 
         logger.info("Running Cluster Health (wait for the shards to startup)");
-        clusterHealth = client().admin().cluster().health(clusterHealthRequest().waitForYellowStatus().waitForActiveShards(1)).actionGet();
-        logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
-        assertThat(clusterHealth.isTimedOut(), equalTo(false));
-        assertThat(clusterHealth.getStatus(), equalTo(ClusterHealthStatus.YELLOW));
+        ensureYellow();
 
         client().admin().indices().prepareRefresh().execute().actionGet();
         assertHitCount(client().prepareCount().setQuery(termQuery("appAccountIds", 179)).execute().actionGet(), 2);
@@ -115,55 +109,86 @@ public class SimpleRecoveryLocalGatewayTests extends ElasticsearchIntegrationTes
     @Slow
     public void testSingleNodeNoFlush() throws Exception {
 
-        cluster().startNode(settingsBuilder().put("index.number_of_shards", 1).build());
+        cluster().startNode(settingsBuilder().build());
 
         String mapping = XContentFactory.jsonBuilder().startObject().startObject("type1")
                 .startObject("properties").startObject("field").field("type", "string").endObject().startObject("num").field("type", "integer").endObject().endObject()
                 .endObject().endObject().string();
-        client().admin().indices().prepareCreate("test").addMapping("type1", mapping).execute().actionGet();
+        // note: default replica settings are tied to #data nodes-1 which is 0 here. We can do with 1 in this test.
+        int numberOfShards = numberOfShards();
+        assertAcked(prepareCreate("test").setSettings(
+                SETTING_NUMBER_OF_SHARDS, numberOfShards(),
+                SETTING_NUMBER_OF_REPLICAS, randomIntBetween(0, 1)
+        ).addMapping("type1", mapping));
 
-        for (int i = 0; i < 100; i++) {
-            client().prepareIndex("test", "type1", "1").setSource(jsonBuilder().startObject().field("_id", "1").field("field", "value1").startArray("num").value(14).value(179).endArray().endObject()).execute().actionGet();
-            client().prepareIndex("test", "type1", "2").setSource(jsonBuilder().startObject().field("_id", "2").field("field", "value2").startArray("num").value(14).endArray().endObject()).execute().actionGet();
+        int value1Docs;
+        int value2Docs;
+        boolean indexToAllShards = randomBoolean();
+
+        if (indexToAllShards) {
+            // insert enough docs so all shards will have a doc
+            value1Docs = randomIntBetween(numberOfShards * 10, numberOfShards * 20);
+            value2Docs = randomIntBetween(numberOfShards * 10, numberOfShards * 20);
+
+        } else {
+            // insert a two docs, some shards will not have anything
+            value1Docs = 1;
+            value2Docs = 1;
         }
 
-        client().admin().indices().prepareRefresh().execute().actionGet();
-        for (int i = 0; i < 10; i++) {
-            assertHitCount(client().prepareCount().setQuery(matchAllQuery()).execute().actionGet(), 2);
-            assertHitCount(client().prepareCount().setQuery(termQuery("field", "value1")).execute().actionGet(), 1);
-            assertHitCount(client().prepareCount().setQuery(termQuery("field", "value2")).execute().actionGet(), 1);
-            assertHitCount(client().prepareCount().setQuery(termQuery("num", 179)).execute().actionGet(), 1);
+
+        for (int i = 0; i < 1 + randomInt(100); i++) {
+            for (int id = 0; id < Math.max(value1Docs, value2Docs); id++) {
+                if (id < value1Docs) {
+                    index("test", "type1", "1_" + id,
+                            jsonBuilder().startObject().field("field", "value1").startArray("num").value(14).value(179).endArray().endObject()
+                    );
+                }
+                if (id < value2Docs) {
+                    index("test", "type1", "2_" + id,
+                            jsonBuilder().startObject().field("field", "value2").startArray("num").value(14).endArray().endObject()
+                    );
+                }
+            }
+
+        }
+
+        refresh();
+
+        for (int i = 0; i <= randomInt(10); i++) {
+            assertHitCount(client().prepareCount().setQuery(matchAllQuery()).get(), value1Docs + value2Docs);
+            assertHitCount(client().prepareCount().setQuery(termQuery("field", "value1")).get(), value1Docs);
+            assertHitCount(client().prepareCount().setQuery(termQuery("field", "value2")).get(), value2Docs);
+            assertHitCount(client().prepareCount().setQuery(termQuery("num", 179)).get(), value1Docs);
+        }
+        if (!indexToAllShards) {
+            // we have to verify primaries are started for them to be restored
+            logger.info("Ensure all primaries have been started");
+            ensureYellow();
+        }
+        cluster().fullRestart();
+
+        logger.info("Running Cluster Health (wait for the shards to startup)");
+        ensureYellow();
+
+        for (int i = 0; i <= randomInt(10); i++) {
+            assertHitCount(client().prepareCount().setQuery(matchAllQuery()).get(), value1Docs + value2Docs);
+            assertHitCount(client().prepareCount().setQuery(termQuery("field", "value1")).get(), value1Docs);
+            assertHitCount(client().prepareCount().setQuery(termQuery("field", "value2")).get(), value2Docs);
+            assertHitCount(client().prepareCount().setQuery(termQuery("num", 179)).get(), value1Docs);
         }
 
         cluster().fullRestart();
 
-        logger.info("Running Cluster Health (wait for the shards to startup)");
-        ClusterHealthResponse clusterHealth = client().admin().cluster().health(clusterHealthRequest().waitForYellowStatus().waitForActiveShards(1)).actionGet();
-        logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
-        assertThat(clusterHealth.isTimedOut(), equalTo(false));
-        assertThat(clusterHealth.getStatus(), equalTo(ClusterHealthStatus.YELLOW));
-
-        for (int i = 0; i < 10; i++) {
-            assertHitCount(client().prepareCount().setQuery(matchAllQuery()).execute().actionGet(), 2);
-            assertHitCount(client().prepareCount().setQuery(termQuery("field", "value1")).execute().actionGet(), 1);
-            assertHitCount(client().prepareCount().setQuery(termQuery("field", "value2")).execute().actionGet(), 1);
-            assertHitCount(client().prepareCount().setQuery(termQuery("num", 179)).execute().actionGet(), 1);
-        }
-
-        cluster().fullRestart();
-
 
         logger.info("Running Cluster Health (wait for the shards to startup)");
-        clusterHealth = client().admin().cluster().health(clusterHealthRequest().waitForYellowStatus().waitForActiveShards(1)).actionGet();
-        logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
-        assertThat(clusterHealth.isTimedOut(), equalTo(false));
-        assertThat(clusterHealth.getStatus(), equalTo(ClusterHealthStatus.YELLOW));
+        ensureYellow();
 
-        for (int i = 0; i < 10; i++) {
-            assertHitCount(client().prepareCount().setQuery(matchAllQuery()).execute().actionGet(), 2);
-            assertHitCount(client().prepareCount().setQuery(termQuery("field", "value1")).execute().actionGet(), 1);
-            assertHitCount(client().prepareCount().setQuery(termQuery("field", "value2")).execute().actionGet(), 1);
-            assertHitCount(client().prepareCount().setQuery(termQuery("num", 179)).execute().actionGet(), 1);
+        for (int i = 0; i <= randomInt(10); i++) {
+            assertHitCount(client().prepareCount().setQuery(matchAllQuery()).get(), value1Docs + value2Docs);
+            assertHitCount(client().prepareCount().setQuery(termQuery("field", "value1")).get(), value1Docs);
+            assertHitCount(client().prepareCount().setQuery(termQuery("field", "value2")).get(), value2Docs);
+            assertHitCount(client().prepareCount().setQuery(termQuery("num", 179)).get(), value1Docs);
         }
     }
 
@@ -172,21 +197,18 @@ public class SimpleRecoveryLocalGatewayTests extends ElasticsearchIntegrationTes
     @Slow
     public void testSingleNodeWithFlush() throws Exception {
 
-        cluster().startNode(settingsBuilder().put("index.number_of_shards", 1).build());
+        cluster().startNode(settingsBuilder().build());
         client().prepareIndex("test", "type1", "1").setSource(jsonBuilder().startObject().field("field", "value1").endObject()).execute().actionGet();
-        client().admin().indices().prepareFlush().execute().actionGet();
+        flush();
         client().prepareIndex("test", "type1", "2").setSource(jsonBuilder().startObject().field("field", "value2").endObject()).execute().actionGet();
-        client().admin().indices().prepareRefresh().execute().actionGet();
+        refresh();
 
         assertHitCount(client().prepareCount().setQuery(matchAllQuery()).execute().actionGet(), 2);
 
         cluster().fullRestart();
 
         logger.info("Running Cluster Health (wait for the shards to startup)");
-        ClusterHealthResponse clusterHealth = client().admin().cluster().health(clusterHealthRequest().waitForYellowStatus().waitForActiveShards(1)).actionGet();
-        logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
-        assertThat(clusterHealth.isTimedOut(), equalTo(false));
-        assertThat(clusterHealth.getStatus(), equalTo(ClusterHealthStatus.YELLOW));
+        ensureYellow();
 
         for (int i = 0; i < 10; i++) {
             assertHitCount(client().prepareCount().setQuery(matchAllQuery()).execute().actionGet(), 2);
@@ -195,10 +217,7 @@ public class SimpleRecoveryLocalGatewayTests extends ElasticsearchIntegrationTes
         cluster().fullRestart();
 
         logger.info("Running Cluster Health (wait for the shards to startup)");
-        clusterHealth = client().admin().cluster().health(clusterHealthRequest().waitForYellowStatus().waitForActiveShards(1)).actionGet();
-        logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
-        assertThat(clusterHealth.isTimedOut(), equalTo(false));
-        assertThat(clusterHealth.getStatus(), equalTo(ClusterHealthStatus.YELLOW));
+        ensureYellow();
 
         for (int i = 0; i < 10; i++) {
             assertHitCount(client().prepareCount().setQuery(matchAllQuery()).execute().actionGet(), 2);
@@ -209,19 +228,16 @@ public class SimpleRecoveryLocalGatewayTests extends ElasticsearchIntegrationTes
     @Slow
     public void testTwoNodeFirstNodeCleared() throws Exception {
 
-        final String firstNode = cluster().startNode(settingsBuilder().put("index.number_of_shards", 1).build());
-        cluster().startNode(settingsBuilder().put("index.number_of_shards", 1).build());
+        final String firstNode = cluster().startNode(settingsBuilder().build());
+        cluster().startNode(settingsBuilder().build());
 
         client().prepareIndex("test", "type1", "1").setSource(jsonBuilder().startObject().field("field", "value1").endObject()).execute().actionGet();
-        client().admin().indices().prepareFlush().execute().actionGet();
+        flush();
         client().prepareIndex("test", "type1", "2").setSource(jsonBuilder().startObject().field("field", "value2").endObject()).execute().actionGet();
-        client().admin().indices().prepareRefresh().execute().actionGet();
+        refresh();
 
         logger.info("Running Cluster Health (wait for the shards to startup)");
-        ClusterHealthResponse clusterHealth = client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForActiveShards(2)).actionGet();
-        logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
-        assertThat(clusterHealth.isTimedOut(), equalTo(false));
-        assertThat(clusterHealth.getStatus(), equalTo(ClusterHealthStatus.GREEN));
+        ensureGreen();
 
         for (int i = 0; i < 10; i++) {
             assertHitCount(client().prepareCount().setQuery(matchAllQuery()).execute().actionGet(), 2);
@@ -241,10 +257,7 @@ public class SimpleRecoveryLocalGatewayTests extends ElasticsearchIntegrationTes
         });
 
         logger.info("Running Cluster Health (wait for the shards to startup)");
-        clusterHealth = client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForActiveShards(2)).actionGet();
-        logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
-        assertThat(clusterHealth.isTimedOut(), equalTo(false));
-        assertThat(clusterHealth.getStatus(), equalTo(ClusterHealthStatus.GREEN));
+        ensureGreen();
 
         for (int i = 0; i < 10; i++) {
             assertHitCount(client().prepareCount().setQuery(matchAllQuery()).execute().actionGet(), 2);
@@ -255,9 +268,7 @@ public class SimpleRecoveryLocalGatewayTests extends ElasticsearchIntegrationTes
     @Slow
     public void testLatestVersionLoaded() throws Exception {
         // clean two nodes
-
-        cluster().startNode(settingsBuilder().put("index.number_of_shards", 1).put("gateway.recover_after_nodes", 2).build());
-        cluster().startNode(settingsBuilder().put("index.number_of_shards", 1).put("gateway.recover_after_nodes", 2).build());
+        cluster().startNodesAsync(2, settingsBuilder().put("gateway.recover_after_nodes", 2).build()).get();
 
         client().prepareIndex("test", "type1", "1").setSource(jsonBuilder().startObject().field("field", "value1").endObject()).execute().actionGet();
         client().admin().indices().prepareFlush().execute().actionGet();
@@ -265,10 +276,7 @@ public class SimpleRecoveryLocalGatewayTests extends ElasticsearchIntegrationTes
         client().admin().indices().prepareRefresh().execute().actionGet();
 
         logger.info("--> running cluster_health (wait for the shards to startup)");
-        ClusterHealthResponse clusterHealth = client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForActiveShards(2)).actionGet();
-        logger.info("--> done cluster_health, status " + clusterHealth.getStatus());
-        assertThat(clusterHealth.isTimedOut(), equalTo(false));
-        assertThat(clusterHealth.getStatus(), equalTo(ClusterHealthStatus.GREEN));
+        ensureGreen();
 
         for (int i = 0; i < 10; i++) {
             assertHitCount(client().prepareCount().setQuery(matchAllQuery()).execute().actionGet(), 2);
@@ -312,10 +320,7 @@ public class SimpleRecoveryLocalGatewayTests extends ElasticsearchIntegrationTes
         });
 
         logger.info("--> running cluster_health (wait for the shards to startup)");
-        clusterHealth = client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForActiveShards(2)).actionGet();
-        logger.info("--> done cluster_health, status " + clusterHealth.getStatus());
-        assertThat(clusterHealth.isTimedOut(), equalTo(false));
-        assertThat(clusterHealth.getStatus(), equalTo(ClusterHealthStatus.GREEN));
+        ensureGreen();
 
         assertThat(client().admin().cluster().prepareState().execute().get().getState().getMetaData().uuid(), equalTo(metaDataUuid));
 
@@ -333,18 +338,13 @@ public class SimpleRecoveryLocalGatewayTests extends ElasticsearchIntegrationTes
     @Test
     @Slow
     public void testReusePeerRecovery() throws Exception {
-
-
         ImmutableSettings.Builder settings = settingsBuilder()
                 .put("action.admin.cluster.node.shutdown.delay", "10ms")
                 .put("gateway.recover_after_nodes", 4)
-
+                .put(MockDirectoryHelper.CRASH_INDEX, false)
                 .put(BalancedShardsAllocator.SETTING_THRESHOLD, 1.1f); // use less agressive settings
 
-        cluster().startNode(settings);
-        cluster().startNode(settings);
-        cluster().startNode(settings);
-        cluster().startNode(settings);
+        cluster().startNodesAsync(4, settings.build()).get();
 
         logger.info("--> indexing docs");
         for (int i = 0; i < 1000; i++) {
@@ -353,11 +353,10 @@ public class SimpleRecoveryLocalGatewayTests extends ElasticsearchIntegrationTes
                 client().admin().indices().prepareFlush().execute().actionGet();
             }
         }
+        client().admin().indices().prepareFlush().execute().actionGet();
+
         logger.info("Running Cluster Health");
-        ClusterHealthResponse clusterHealth = client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForRelocatingShards(0)).actionGet();
-        logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
-        assertThat(clusterHealth.isTimedOut(), equalTo(false));
-        assertThat(clusterHealth.getStatus(), equalTo(ClusterHealthStatus.GREEN));
+        ensureGreen();
 
         logger.info("--> shutting down the nodes");
         // Disable allocations while we are closing nodes
@@ -365,10 +364,7 @@ public class SimpleRecoveryLocalGatewayTests extends ElasticsearchIntegrationTes
         cluster().fullRestart();
 
         logger.info("Running Cluster Health");
-        clusterHealth = client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForActiveShards(10)).actionGet();
-        logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
-        assertThat(clusterHealth.isTimedOut(), equalTo(false));
-        assertThat(clusterHealth.getStatus(), equalTo(ClusterHealthStatus.GREEN));
+        ensureGreen();
 
         logger.info("--> shutting down the nodes");
         // Disable allocations while we are closing nodes
@@ -377,22 +373,19 @@ public class SimpleRecoveryLocalGatewayTests extends ElasticsearchIntegrationTes
 
 
         logger.info("Running Cluster Health");
-        clusterHealth = client().admin().cluster().health(clusterHealthRequest().waitForGreenStatus().waitForActiveShards(10)).actionGet();
-        logger.info("Done Cluster Health, status " + clusterHealth.getStatus());
-        assertThat(clusterHealth.isTimedOut(), equalTo(false));
-        assertThat(clusterHealth.getStatus(), equalTo(ClusterHealthStatus.GREEN));
+        ensureGreen();
 
-        IndicesStatusResponse statusResponse = client().admin().indices().prepareStatus("test").setRecovery(true).execute().actionGet();
-        for (IndexShardStatus indexShardStatus : statusResponse.getIndex("test")) {
-            for (ShardStatus shardStatus : indexShardStatus) {
-                if (!shardStatus.getShardRouting().primary()) {
-                    logger.info("--> shard {}, recovered {}, reuse {}", shardStatus.getShardId(), shardStatus.getPeerRecoveryStatus().getRecoveredIndexSize(), shardStatus.getPeerRecoveryStatus().getReusedIndexSize());
-                    assertThat(shardStatus.getPeerRecoveryStatus().getRecoveredIndexSize().bytes(), greaterThan(0l));
-                    assertThat(shardStatus.getPeerRecoveryStatus().getReusedIndexSize().bytes(), greaterThan(0l));
-                    assertThat(shardStatus.getPeerRecoveryStatus().getReusedIndexSize().bytes(), greaterThan(shardStatus.getPeerRecoveryStatus().getRecoveredIndexSize().bytes()));
-                }
+        RecoveryResponse recoveryResponse = client().admin().indices().prepareRecoveries("test").get();
+        for (ShardRecoveryResponse response : recoveryResponse.shardResponses().get("test")) {
+            RecoveryState recoveryState = response.recoveryState();
+            if (!recoveryState.getPrimary()) {
+                logger.info("--> shard {}, recovered {}, reuse {}", response.getShardId(), recoveryState.getIndex().recoveredTotalSize(), recoveryState.getIndex().reusedByteCount());
+                assertThat(recoveryState.getIndex().recoveredByteCount(), greaterThan(0l));
+                assertThat(recoveryState.getIndex().reusedByteCount(), greaterThan(0l));
+                assertThat(recoveryState.getIndex().reusedByteCount(), greaterThan(recoveryState.getIndex().numberOfRecoveredBytes()));
             }
         }
+
     }
 
     @Test
@@ -406,8 +399,7 @@ public class SimpleRecoveryLocalGatewayTests extends ElasticsearchIntegrationTes
 
         cluster().startNode(settingsBuilder().put("path.data", "data/data2").build());
 
-        ClusterHealthResponse health = client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForGreenStatus().execute().actionGet();
-        assertThat(health.isTimedOut(), equalTo(false));
+        ensureGreen();
 
         cluster().fullRestart(new RestartCallback() {
 
@@ -417,9 +409,7 @@ public class SimpleRecoveryLocalGatewayTests extends ElasticsearchIntegrationTes
             }
         });
 
-
-        health = client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForYellowStatus().execute().actionGet();
-        assertThat(health.isTimedOut(), equalTo(false));
+        ensureYellow();
 
         assertThat(client().admin().indices().prepareExists("test").execute().actionGet().isExists(), equalTo(true));
         assertHitCount(client().prepareCount("test").setQuery(QueryBuilders.matchAllQuery()).execute().actionGet(), 1);

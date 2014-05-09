@@ -258,13 +258,13 @@ public abstract class AbstractFieldMapper<T> implements FieldMapper<T> {
 
     private static final ThreadLocal<List<Field>> FIELD_LIST = new ThreadLocal<List<Field>>() {
         protected List<Field> initialValue() {
-            return new ArrayList<Field>(2);
+            return new ArrayList<>(2);
         }
     };
 
     protected final Names names;
     protected float boost;
-    protected final FieldType fieldType;
+    protected FieldType fieldType;
     private final boolean docValues;
     protected final NamedAnalyzer indexAnalyzer;
     protected NamedAnalyzer searchAnalyzer;
@@ -494,7 +494,7 @@ public abstract class AbstractFieldMapper<T> implements FieldMapper<T> {
     public Filter termsFilter(IndexFieldDataService fieldDataService, List values, @Nullable QueryParseContext context) {
         // create with initial size large enough to avoid rehashing
         ObjectOpenHashSet<BytesRef> terms =
-                new ObjectOpenHashSet<BytesRef>((int) (values.size() * (1 + ObjectOpenHashSet.DEFAULT_LOAD_FACTOR)));
+                new ObjectOpenHashSet<>((int) (values.size() * (1 + ObjectOpenHashSet.DEFAULT_LOAD_FACTOR)));
         for (int i = 0, len = values.size(); i < len; i++) {
             terms.add(indexedValueForSearch(values.get(i)));
         }
@@ -579,8 +579,8 @@ public abstract class AbstractFieldMapper<T> implements FieldMapper<T> {
             // when the doc_values field data format is configured
             mergeContext.addConflict("mapper [" + names.fullName() + "] has different " + TypeParsers.DOC_VALUES + " values");
         }
-        if (this.fieldType().omitNorms() != fieldMergeWith.fieldType.omitNorms()) {
-            mergeContext.addConflict("mapper [" + names.fullName() + "] has different `norms.enabled` values");
+        if (this.fieldType().omitNorms() && !fieldMergeWith.fieldType.omitNorms()) {
+            mergeContext.addConflict("mapper [" + names.fullName() + "] cannot enable norms (`norms.enabled`)");
         }
         if (this.fieldType().tokenized() != fieldMergeWith.fieldType().tokenized()) {
             mergeContext.addConflict("mapper [" + names.fullName() + "] has different tokenize values");
@@ -606,6 +606,9 @@ public abstract class AbstractFieldMapper<T> implements FieldMapper<T> {
         } else if (!this.indexAnalyzer.name().equals(fieldMergeWith.indexAnalyzer.name())) {
             mergeContext.addConflict("mapper [" + names.fullName() + "] has different index_analyzer");
         }
+        if (!this.names().equals(fieldMergeWith.names())) {
+            mergeContext.addConflict("mapper [" + names.fullName() + "] has different index_name");
+        }
 
         if (this.similarity == null) {
             if (fieldMergeWith.similarity() != null) {
@@ -620,6 +623,9 @@ public abstract class AbstractFieldMapper<T> implements FieldMapper<T> {
 
         if (!mergeContext.mergeFlags().simulate()) {
             // apply changeable values
+            this.fieldType = new FieldType(this.fieldType);
+            this.fieldType.setOmitNorms(fieldMergeWith.fieldType.omitNorms());
+            this.fieldType.freeze();
             this.boost = fieldMergeWith.boost;
             this.normsLoading = fieldMergeWith.normsLoading;
             this.copyTo = fieldMergeWith.copyTo;
@@ -911,6 +917,8 @@ public abstract class AbstractFieldMapper<T> implements FieldMapper<T> {
                 return;
             }
 
+            context.setWithinMultiFields();
+
             ContentPath.Type origPathType = context.path().pathType();
             context.path().pathType(pathType);
 
@@ -920,6 +928,8 @@ public abstract class AbstractFieldMapper<T> implements FieldMapper<T> {
             }
             context.path().remove();
             context.path().pathType(origPathType);
+
+            context.clearWithinMultiFields();
         }
 
         // No need for locking, because locking is taken care of in ObjectMapper#merge and DocumentMapper#merge
@@ -945,7 +955,7 @@ public abstract class AbstractFieldMapper<T> implements FieldMapper<T> {
                         newMappersBuilder.put(mergeWithMapper.name(), mergeWithMapper);
                         if (mergeWithMapper instanceof AbstractFieldMapper) {
                             if (newFieldMappers == null) {
-                                newFieldMappers = new ArrayList<FieldMapper>(2);
+                                newFieldMappers = new ArrayList<>(2);
                             }
                             newFieldMappers.add((FieldMapper) mergeWithMapper);
                         }

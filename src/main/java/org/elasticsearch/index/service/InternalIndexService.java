@@ -34,7 +34,6 @@ import org.elasticsearch.index.aliases.IndexAliasesService;
 import org.elasticsearch.index.analysis.AnalysisService;
 import org.elasticsearch.index.cache.IndexCache;
 import org.elasticsearch.index.cache.filter.ShardFilterCacheModule;
-import org.elasticsearch.index.cache.id.ShardIdCacheModule;
 import org.elasticsearch.index.deletionpolicy.DeletionPolicyModule;
 import org.elasticsearch.index.engine.Engine;
 import org.elasticsearch.index.engine.EngineModule;
@@ -66,6 +65,7 @@ import org.elasticsearch.index.snapshots.IndexShardSnapshotModule;
 import org.elasticsearch.index.store.IndexStore;
 import org.elasticsearch.index.store.Store;
 import org.elasticsearch.index.store.StoreModule;
+import org.elasticsearch.index.suggest.SuggestShardModule;
 import org.elasticsearch.index.termvectors.ShardTermVectorModule;
 import org.elasticsearch.index.translog.Translog;
 import org.elasticsearch.index.translog.TranslogModule;
@@ -153,7 +153,6 @@ public class InternalIndexService extends AbstractIndexComponent implements Inde
 
         // inject workarounds for cyclic dep
         indexCache.filter().setIndexService(this);
-        indexCache.idCache().setIndexService(this);
         indexFieldData.setIndexService(this);
     }
 
@@ -330,13 +329,13 @@ public class InternalIndexService extends AbstractIndexComponent implements Inde
         modules.add(new MergeSchedulerModule(indexSettings));
         modules.add(new ShardFilterCacheModule());
         modules.add(new ShardFieldDataModule());
-        modules.add(new ShardIdCacheModule());
         modules.add(new TranslogModule(indexSettings));
         modules.add(new EngineModule(indexSettings));
         modules.add(new IndexShardGatewayModule(injector.getInstance(IndexGateway.class)));
         modules.add(new PercolatorShardModule());
         modules.add(new ShardTermVectorModule());
         modules.add(new IndexShardSnapshotModule());
+        modules.add(new SuggestShardModule());
 
         Injector shardInjector;
         try {
@@ -408,12 +407,6 @@ public class InternalIndexService extends AbstractIndexComponent implements Inde
             shardInjector.getInstance(MergePolicyProvider.class).close();
         } catch (Throwable e) {
             logger.debug("failed to close merge policy provider", e);
-            // ignore
-        }
-        try {
-            shardInjector.getInstance(IndexShardGatewayService.class).snapshotOnClose();
-        } catch (Throwable e) {
-            logger.debug("failed to snapshot index shard gateway on close", e);
             // ignore
         }
         try {

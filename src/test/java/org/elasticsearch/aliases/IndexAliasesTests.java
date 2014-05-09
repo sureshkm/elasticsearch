@@ -19,9 +19,13 @@
 
 package org.elasticsearch.aliases;
 
+import org.elasticsearch.ElasticsearchIllegalArgumentException;
 import org.elasticsearch.action.ActionRequestValidationException;
+import org.elasticsearch.action.admin.indices.alias.Alias;
+import org.elasticsearch.action.admin.indices.alias.IndicesAliasesRequestBuilder;
 import org.elasticsearch.action.admin.indices.alias.exists.AliasesExistResponse;
 import org.elasticsearch.action.admin.indices.alias.get.GetAliasesResponse;
+import org.elasticsearch.action.admin.indices.create.CreateIndexRequestBuilder;
 import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.cluster.ClusterState;
@@ -29,10 +33,9 @@ import org.elasticsearch.cluster.metadata.AliasAction;
 import org.elasticsearch.cluster.metadata.AliasMetaData;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
 import org.elasticsearch.common.StopWatch;
-import org.elasticsearch.common.settings.ImmutableSettings;
-import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.index.query.FilterBuilder;
+import org.elasticsearch.index.query.FilterBuilders;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.indices.IndexMissingException;
 import org.elasticsearch.rest.action.admin.indices.alias.delete.AliasesMissingException;
@@ -97,12 +100,22 @@ public class IndexAliasesTests extends ElasticsearchIntegrationTest {
 
         ensureGreen();
 
+        //invalid filter, invalid json
+        IndicesAliasesRequestBuilder indicesAliasesRequestBuilder = admin().indices().prepareAliases().addAlias("test", "alias1", "abcde");
         try {
-            logger.info("--> aliasing index [test] with [alias1] and filter [t]");
-            admin().indices().prepareAliases().addAlias("test", "alias1", "{ t }").get();
-            fail();
-        } catch (Exception e) {
-            // all is well
+            indicesAliasesRequestBuilder.get();
+            fail("put alias should have been failed due to invalid filter");
+        } catch (ElasticsearchIllegalArgumentException e) {
+            assertThat(e.getMessage(), equalTo("failed to parse filter for alias [alias1]"));
+        }
+
+        //valid json , invalid filter
+        indicesAliasesRequestBuilder = admin().indices().prepareAliases().addAlias("test", "alias1", "{ \"test\": {} }");
+        try {
+            indicesAliasesRequestBuilder.get();
+            fail("put alias should have been failed due to invalid filter");
+        } catch (ElasticsearchIllegalArgumentException e) {
+            assertThat(e.getMessage(), equalTo("failed to parse filter for alias [alias1]"));
         }
     }
 
@@ -535,16 +548,13 @@ public class IndexAliasesTests extends ElasticsearchIntegrationTest {
 
     @Test
     public void testIndicesGetAliases() throws Exception {
-        Settings indexSettings = ImmutableSettings.settingsBuilder()
-                .put("index.number_of_shards", 1)
-                .put("index.number_of_replicas", 0)
-                .build();
+
         logger.info("--> creating indices [foobar, test, test123, foobarbaz, bazbar]");
-        assertAcked(prepareCreate("foobar").setSettings(indexSettings));
-        assertAcked(prepareCreate("test").setSettings(indexSettings));
-        assertAcked(prepareCreate("test123").setSettings(indexSettings));
-        assertAcked(prepareCreate("foobarbaz").setSettings(indexSettings));
-        assertAcked(prepareCreate("bazbar").setSettings(indexSettings));
+        createIndex("foobar");
+        createIndex("test");
+        createIndex("test123");
+        createIndex("foobarbaz");
+        createIndex("bazbar");
 
         ensureGreen();
 
@@ -817,6 +827,88 @@ public class IndexAliasesTests extends ElasticsearchIntegrationTest {
         GetAliasesResponse response = admin().indices().prepareGetAliases().get();
         assertThat(response.getAliases(), hasKey("index1"));
         assertThat(response.getAliases(), hasKey("index1"));
+    }
+
+    @Test
+    public void testCreateIndexWithAliases() throws Exception {
+        assertAcked(prepareCreate("test").addAlias(new Alias("alias1"))
+                .addAlias(new Alias("alias2").filter(FilterBuilders.missingFilter("field")))
+                .addAlias(new Alias("alias3").indexRouting("index").searchRouting("search")));
+
+        checkAliases();
+    }
+
+    @Test
+    public void testCreateIndexWithAliasesInSource() throws Exception {
+        assertAcked(prepareCreate("test").setSource("{\n" +
+                        "    \"aliases\" : {\n" +
+                        "        \"alias1\" : {},\n" +
+                        "        \"alias2\" : {\"filter\" : {\"term\": {\"field\":\"value\"}}},\n" +
+                        "        \"alias3\" : { \"index_routing\" : \"index\", \"search_routing\" : \"search\"}\n" +
+                        "    }\n" +
+                        "}"));
+
+        checkAliases();
+    }
+
+    @Test
+    public void testCreateIndexWithAliasesSource() throws Exception {
+        assertAcked(prepareCreate("test").setAliases("{\n" +
+                "        \"alias1\" : {},\n" +
+                "        \"alias2\" : {\"filter\" : {\"term\": {\"field\":\"value\"}}},\n" +
+                "        \"alias3\" : { \"index_routing\" : \"index\", \"search_routing\" : \"search\"}\n" +
+                "}"));
+
+        checkAliases();
+    }
+
+    @Test
+    public void testCreateIndexWithAliasesFilterNotValid() {
+        //non valid filter, invalid json
+        CreateIndexRequestBuilder createIndexRequestBuilder = prepareCreate("test").addAlias(new Alias("alias2").filter("f"));
+
+        try {
+            createIndexRequestBuilder.get();
+            fail("create index should have failed due to invalid alias filter");
+        } catch (ElasticsearchIllegalArgumentException e) {
+            assertThat(e.getMessage(), equalTo("failed to parse filter for alias [alias2]"));
+        }
+
+        //valid json but non valid filter
+        createIndexRequestBuilder = prepareCreate("test").addAlias(new Alias("alias2").filter("{ \"test\": {} }"));
+
+        try {
+            createIndexRequestBuilder.get();
+            fail("create index should have failed due to invalid alias filter");
+        } catch (ElasticsearchIllegalArgumentException e) {
+            assertThat(e.getMessage(), equalTo("failed to parse filter for alias [alias2]"));
+        }
+    }
+
+    private void checkAliases() {
+        GetAliasesResponse getAliasesResponse = admin().indices().prepareGetAliases("alias1").get();
+        assertThat(getAliasesResponse.getAliases().get("test").size(), equalTo(1));
+        AliasMetaData aliasMetaData = getAliasesResponse.getAliases().get("test").get(0);
+        assertThat(aliasMetaData.alias(), equalTo("alias1"));
+        assertThat(aliasMetaData.filter(), nullValue());
+        assertThat(aliasMetaData.indexRouting(), nullValue());
+        assertThat(aliasMetaData.searchRouting(), nullValue());
+
+        getAliasesResponse = admin().indices().prepareGetAliases("alias2").get();
+        assertThat(getAliasesResponse.getAliases().get("test").size(), equalTo(1));
+        aliasMetaData = getAliasesResponse.getAliases().get("test").get(0);
+        assertThat(aliasMetaData.alias(), equalTo("alias2"));
+        assertThat(aliasMetaData.filter(), notNullValue());
+        assertThat(aliasMetaData.indexRouting(), nullValue());
+        assertThat(aliasMetaData.searchRouting(), nullValue());
+
+        getAliasesResponse = admin().indices().prepareGetAliases("alias3").get();
+        assertThat(getAliasesResponse.getAliases().get("test").size(), equalTo(1));
+        aliasMetaData = getAliasesResponse.getAliases().get("test").get(0);
+        assertThat(aliasMetaData.alias(), equalTo("alias3"));
+        assertThat(aliasMetaData.filter(), nullValue());
+        assertThat(aliasMetaData.indexRouting(), equalTo("index"));
+        assertThat(aliasMetaData.searchRouting(), equalTo("search"));
     }
 
     private void assertHits(SearchHits hits, String... ids) {

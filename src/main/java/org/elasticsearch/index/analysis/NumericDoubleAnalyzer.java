@@ -20,7 +20,6 @@
 package org.elasticsearch.index.analysis;
 
 import com.carrotsearch.hppc.IntObjectOpenHashMap;
-import org.apache.lucene.util.NumericUtils;
 
 import java.io.IOException;
 import java.io.Reader;
@@ -33,7 +32,7 @@ public class NumericDoubleAnalyzer extends NumericAnalyzer<NumericDoubleTokenize
     private final static IntObjectOpenHashMap<NamedAnalyzer> builtIn;
 
     static {
-        builtIn = new IntObjectOpenHashMap<NamedAnalyzer>();
+        builtIn = new IntObjectOpenHashMap<>();
         builtIn.put(Integer.MAX_VALUE, new NamedAnalyzer("_double/max", AnalyzerScope.GLOBAL, new NumericDoubleAnalyzer(Integer.MAX_VALUE)));
         for (int i = 0; i <= 64; i += 4) {
             builtIn.put(i, new NamedAnalyzer("_double/" + i, AnalyzerScope.GLOBAL, new NumericDoubleAnalyzer(i)));
@@ -49,10 +48,6 @@ public class NumericDoubleAnalyzer extends NumericAnalyzer<NumericDoubleTokenize
     }
 
     private final int precisionStep;
-
-    public NumericDoubleAnalyzer() {
-        this(NumericUtils.PRECISION_STEP_DEFAULT);
-    }
 
     public NumericDoubleAnalyzer(int precisionStep) {
         this.precisionStep = precisionStep;

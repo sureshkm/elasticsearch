@@ -31,11 +31,14 @@ import java.util.Map;
  * query, but won't throw exceptions for any weird string syntax.
  */
 public class SimpleQueryStringBuilder extends BaseQueryBuilder {
-    private Map<String, Float> fields = new HashMap<String, Float>();
+    private Map<String, Float> fields = new HashMap<>();
     private String analyzer;
     private Operator operator;
     private final String queryText;
     private int flags = -1;
+    private Boolean lowercaseExpandedTerms;
+    private Boolean lenient;
+    private Locale locale;
 
     /**
      * Operators for the default_operator
@@ -101,6 +104,21 @@ public class SimpleQueryStringBuilder extends BaseQueryBuilder {
         return this;
     }
 
+    public SimpleQueryStringBuilder lowercaseExpandedTerms(boolean lowercaseExpandedTerms) {
+        this.lowercaseExpandedTerms = lowercaseExpandedTerms;
+        return this;
+    }
+
+    public SimpleQueryStringBuilder locale(Locale locale) {
+        this.locale = locale;
+        return this;
+    }
+
+    public SimpleQueryStringBuilder lenient(boolean lenient) {
+        this.lenient = lenient;
+        return this;
+    }
+
     @Override
     public void doXContent(XContentBuilder builder, Params params) throws IOException {
         builder.startObject(SimpleQueryStringParser.NAME);
@@ -131,6 +149,18 @@ public class SimpleQueryStringBuilder extends BaseQueryBuilder {
 
         if (operator != null) {
             builder.field("default_operator", operator.name().toLowerCase(Locale.ROOT));
+        }
+
+        if (lowercaseExpandedTerms != null) {
+            builder.field("lowercase_expanded_terms", lowercaseExpandedTerms);
+        }
+
+        if (lenient != null) {
+            builder.field("lenient", lenient);
+        }
+
+        if (locale != null) {
+            builder.field("locale", locale.toString());
         }
 
         builder.endObject();

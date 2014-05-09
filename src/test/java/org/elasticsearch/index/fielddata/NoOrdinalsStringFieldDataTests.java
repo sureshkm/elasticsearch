@@ -23,17 +23,15 @@ import org.apache.lucene.index.AtomicReaderContext;
 import org.apache.lucene.index.IndexReader;
 import org.elasticsearch.index.Index;
 import org.elasticsearch.index.fielddata.fieldcomparator.BytesRefFieldComparatorSource;
-import org.elasticsearch.index.fielddata.fieldcomparator.SortMode;
 import org.elasticsearch.index.mapper.FieldMapper.Names;
+import org.elasticsearch.search.MultiValueMode;
+import org.junit.Test;
 
 /** Returns an implementation based on paged bytes which doesn't implement WithOrdinals in order to visit different paths in the code,
  *  eg. BytesRefFieldComparatorSource makes decisions based on whether the field data implements WithOrdinals. */
 public class NoOrdinalsStringFieldDataTests extends PagedBytesStringFieldDataTests {
 
-    @SuppressWarnings("unchecked")
-    @Override
-    public IndexFieldData<AtomicFieldData<ScriptDocValues>> getForField(String fieldName) {
-        final IndexFieldData<?> in = super.getForField(fieldName);
+    public static IndexFieldData<AtomicFieldData<ScriptDocValues>> hideOrdinals(final IndexFieldData<?> in) {
         return new IndexFieldData<AtomicFieldData<ScriptDocValues>>() {
 
             @Override
@@ -44,6 +42,11 @@ public class NoOrdinalsStringFieldDataTests extends PagedBytesStringFieldDataTes
             @Override
             public Names getFieldNames() {
                 return in.getFieldNames();
+            }
+
+            @Override
+            public FieldDataType getFieldDataType() {
+                return in.getFieldDataType();
             }
 
             @Override
@@ -62,7 +65,7 @@ public class NoOrdinalsStringFieldDataTests extends PagedBytesStringFieldDataTes
             }
 
             @Override
-            public XFieldComparatorSource comparatorSource(Object missingValue, SortMode sortMode) {
+            public XFieldComparatorSource comparatorSource(Object missingValue, MultiValueMode sortMode) {
                 return new BytesRefFieldComparatorSource(this, missingValue, sortMode);
             }
 
@@ -79,4 +82,15 @@ public class NoOrdinalsStringFieldDataTests extends PagedBytesStringFieldDataTes
         };
     }
 
+    @SuppressWarnings("unchecked")
+    @Override
+    public IndexFieldData<AtomicFieldData<ScriptDocValues>> getForField(String fieldName) {
+        return hideOrdinals(super.getForField(fieldName));
+    }
+
+    @Test
+    @Override
+    public void testTermsEnum() throws Exception {
+        // We can't test this, since the returned IFD instance doesn't implement IndexFieldData.WithOrdinals
+    }
 }

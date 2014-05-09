@@ -81,6 +81,8 @@ include::search/uri-request.asciidoc[]
 
 include::search/request-body.asciidoc[]
 
+include::search/search-template.asciidoc[]
+
 include::search/facets.asciidoc[]
 
 include::search/aggregations.asciidoc[]
@@ -98,4 +100,6 @@ include::search/explain.asciidoc[]
 include::search/percolate.asciidoc[]
 
 include::search/more-like-this.asciidoc[]
+
+include::search/benchmark.asciidoc[]
 

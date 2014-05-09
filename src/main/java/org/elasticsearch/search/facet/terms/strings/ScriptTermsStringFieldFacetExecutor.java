@@ -80,7 +80,7 @@ public class ScriptTermsStringFieldFacetExecutor extends FacetExecutor {
     @Override
     public InternalFacet buildFacet(String facetName) {
         if (facets.v().isEmpty()) {
-            facets.release();
+            facets.close();
             return new InternalStringTermsFacet(facetName, comparatorType, size, ImmutableList.<InternalStringTermsFacet.TermEntry>of(), missing, total);
         } else {
             final boolean[] states = facets.v().allocated;
@@ -98,17 +98,17 @@ public class ScriptTermsStringFieldFacetExecutor extends FacetExecutor {
                 for (int i = ordered.size() - 1; i >= 0; i--) {
                     list[i] = ((InternalStringTermsFacet.TermEntry) ordered.pop());
                 }
-                facets.release();
+                facets.close();
                 return new InternalStringTermsFacet(facetName, comparatorType, size, Arrays.asList(list), missing, total);
             } else {
-                BoundedTreeSet<InternalStringTermsFacet.TermEntry> ordered = new BoundedTreeSet<InternalStringTermsFacet.TermEntry>(comparatorType.comparator(), shardSize);
+                BoundedTreeSet<InternalStringTermsFacet.TermEntry> ordered = new BoundedTreeSet<>(comparatorType.comparator(), shardSize);
                 for (int i = 0; i < states.length; i++) {
                     if (states[i]) {
                         BytesRef key = (BytesRef) keys[i];
                         ordered.add(new InternalStringTermsFacet.TermEntry(key, values[i]));
                     }
                 }
-                facets.release();
+                facets.close();
                 return new InternalStringTermsFacet(facetName, comparatorType, size, ordered, missing, total);
             }
         }

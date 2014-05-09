@@ -34,7 +34,6 @@ import org.elasticsearch.script.SearchScript;
 import org.elasticsearch.search.facet.FacetExecutor;
 import org.elasticsearch.search.facet.FacetParser;
 import org.elasticsearch.search.facet.terms.doubles.TermsDoubleFacetExecutor;
-import org.elasticsearch.search.facet.terms.index.IndexNameFacetExecutor;
 import org.elasticsearch.search.facet.terms.longs.TermsLongFacetExecutor;
 import org.elasticsearch.search.facet.terms.strings.FieldsTermsStringFacetExecutor;
 import org.elasticsearch.search.facet.terms.strings.ScriptTermsStringFieldFacetExecutor;
@@ -151,10 +150,6 @@ public class TermsFacetParser extends AbstractComponent implements FacetParser {
             }
         }
 
-        if ("_index".equals(field)) {
-            return new IndexNameFacetExecutor(context.shardTarget().index(), comparatorType, size);
-        }
-
         if (fieldsNames != null && fieldsNames.length == 1) {
             field = fieldsNames[0];
             fieldsNames = null;
@@ -178,7 +173,7 @@ public class TermsFacetParser extends AbstractComponent implements FacetParser {
         if (fieldsNames != null) {
 
             // in case of multi files, we only collect the fields that are mapped and facet on them.
-            ArrayList<FieldMapper> mappers = new ArrayList<FieldMapper>(fieldsNames.length);
+            ArrayList<FieldMapper> mappers = new ArrayList<>(fieldsNames.length);
             for (int i = 0; i < fieldsNames.length; i++) {
                 FieldMapper mapper = context.smartNameFieldMapper(fieldsNames[i]);
                 if (mapper != null) {

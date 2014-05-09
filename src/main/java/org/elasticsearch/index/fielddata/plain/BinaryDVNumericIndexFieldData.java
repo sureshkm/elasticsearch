@@ -23,11 +23,12 @@ import com.google.common.base.Preconditions;
 import org.apache.lucene.index.AtomicReaderContext;
 import org.elasticsearch.ElasticsearchIllegalStateException;
 import org.elasticsearch.index.Index;
+import org.elasticsearch.index.fielddata.FieldDataType;
 import org.elasticsearch.index.fielddata.IndexNumericFieldData;
 import org.elasticsearch.index.fielddata.fieldcomparator.DoubleValuesComparatorSource;
 import org.elasticsearch.index.fielddata.fieldcomparator.FloatValuesComparatorSource;
 import org.elasticsearch.index.fielddata.fieldcomparator.LongValuesComparatorSource;
-import org.elasticsearch.index.fielddata.fieldcomparator.SortMode;
+import org.elasticsearch.search.MultiValueMode;
 import org.elasticsearch.index.mapper.FieldMapper.Names;
 
 import java.io.IOException;
@@ -36,8 +37,8 @@ public class BinaryDVNumericIndexFieldData extends DocValuesIndexFieldData imple
 
     private final NumericType numericType;
 
-    public BinaryDVNumericIndexFieldData(Index index, Names fieldNames, NumericType numericType) {
-        super(index, fieldNames);
+    public BinaryDVNumericIndexFieldData(Index index, Names fieldNames, NumericType numericType, FieldDataType fieldDataType) {
+        super(index, fieldNames, fieldDataType);
         Preconditions.checkArgument(numericType != null, "numericType must be non-null");
         this.numericType = numericType;
     }
@@ -47,7 +48,7 @@ public class BinaryDVNumericIndexFieldData extends DocValuesIndexFieldData imple
         return false;
     }
 
-    public org.elasticsearch.index.fielddata.IndexFieldData.XFieldComparatorSource comparatorSource(final Object missingValue, final SortMode sortMode) {
+    public org.elasticsearch.index.fielddata.IndexFieldData.XFieldComparatorSource comparatorSource(final Object missingValue, final MultiValueMode sortMode) {
         switch (numericType) {
         case FLOAT:
             return new FloatValuesComparatorSource(this, missingValue, sortMode);
